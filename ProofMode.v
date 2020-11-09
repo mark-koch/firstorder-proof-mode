@@ -328,9 +328,9 @@ Section FullLogic.
         (* ? *)
   Admitted.
 
-  
-  
-  
+
+
+
 
 
   (* Returns a new formula where all occurences of "t" are turned into *)
@@ -360,13 +360,16 @@ Section FullLogic.
     | _ => G
     end.
 
-  Ltac frewrite' T A :=
+  Ltac frewrite' T A back :=
     let H := fresh "H" in
     turn_into_hypothesis T H;
     fspecialize_list H A; 
     instantiate_evars H; 
     simpl_subst H;
-    match type of H with _ ⊢ (?t == ?t') =>
+    match type of H with _ ⊢ (?_t == ?_t') =>
+      let t := match back with true => _t' | false => _t end in
+      let t' := match back with true => _t | false => _t' end in
+
       (* 1. Replace each occurence of "t" with "($0)[t..]" and every other *)
       (*  "s" with "s[↑][t..]". The new formula is created with the [add_shifts] *)
       (*  tactic and proven with the shift lemmas. *)
@@ -382,18 +385,17 @@ Section FullLogic.
         let G' := remove_shifts G t in change (U ⊢ G'[t..])
       end;
 
-      (* 3. Change [t..] to [t'...] using leibniz *)
-      tryif apply (leibniz FA) with (t := t'); [ firstorder | now fapply ax_sym |] then idtac
-      else (
-        let L := fresh "L" in
-        assert (L := leibniz);
-        match goal with [ |- ?U ⊢ ?s[t..] ] => 
-          specialize (L U s t' t);
-          eapply (Weak _ U) in L;
-          [ apply L | firstorder | fapply ax_sym; ctx | | now intros ? ]
-        end;
-        clear L
-      );
+      (* 3. Change [t..] to [t'...] using leibniz. For some reason  *)
+      (*  we cannot directly [apply leibniz with (t := t')] if t'  *)
+      (*  contains ⊕, σ, etc. But evar seems to work. *)
+      let t'' := fresh "t" in 
+      eapply (leibniz _ _ ?[t'']);
+      [ instantiate (t'' := t'); firstorder |
+        match back with
+        | false => feapply ax_sym; apply H
+        | true => apply H
+        end
+      | ];
 
       (* 4. Pull substitutions inward *)
       cbn;
@@ -412,11 +414,15 @@ Section FullLogic.
     end;
     clear H.
   
-  Tactic Notation "frewrite" constr(T) := frewrite' T constr:([] : list form).
-  Tactic Notation "frewrite" "(" constr(T) constr(x1) ")" := frewrite' T constr:([x1]).
-  Tactic Notation "frewrite" "(" constr(T) constr(x1) constr(x2) ")" := frewrite' T constr:([x1;x2]).
-  Tactic Notation "frewrite" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := frewrite' T constr:([x1;x2;x3]).
-    
+  Tactic Notation "frewrite" constr(T) := frewrite' T constr:([] : list form) constr:(false).
+  Tactic Notation "frewrite" "(" constr(T) constr(x1) ")" := frewrite' T constr:([x1]) constr:(false).
+  Tactic Notation "frewrite" "(" constr(T) constr(x1) constr(x2) ")" := frewrite' T constr:([x1;x2]) constr:(false).
+  Tactic Notation "frewrite" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := frewrite' T constr:([x1;x2;x3]) constr:(false).
+  
+  Tactic Notation "frewrite" "<-" constr(T) := frewrite' T constr:([] : list form) constr:(true).
+  Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) ")" := frewrite' T constr:([x1]) constr:(true).
+  Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) constr(x2) ")" := frewrite' T constr:([x1;x2]) constr:(true).
+  Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := frewrite' T constr:([x1;x2;x3]) constr:(true).
 
 
 
@@ -430,4 +436,21 @@ Section FullLogic.
   Proof.
     intros. fintros. frewrite 0. fapply ax_add_zero.
   Qed.
+
+  Lemma num_add_homomorphism' x y :
+    FA ⊢ (num x ⊕ num y == num (x + y)).
+  Proof.
+    induction x; cbn.
+    - fapply ax_add_zero.
+    - frewrite <- IHx. fapply ax_add_rec.
+  Qed.
+    
+  Lemma num_mult_homomorphism' x y : FA ⊢ ( num x ⊗ num y == num (x * y) ).
+  Proof.
+    induction x; cbn.
+    - fapply ax_mult_zero.
+    - frewrite (ax_mult_rec (num x) (num y)). (* Sadly we need to give the arguments. TODO: Extend tactics to work with terms containing evars *)
+      frewrite IHx. apply num_add_homomorphism'.
+  Qed.
+
     
