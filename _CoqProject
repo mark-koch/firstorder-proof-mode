@@ -1,0 +1,11 @@
+-R . Arith
+
+-install none
+COQDOCFLAGS = "--charset utf-8 --parse-comments -s --with-header ../website/resources/header.html --with-footer ../website/resources/footer.html --index indexpage"
+
+
+FOL.v
+Tarski.v
+VectorTech.v
+Deduction.v
+PA.v
