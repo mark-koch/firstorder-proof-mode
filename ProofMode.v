@@ -12,8 +12,9 @@ Import ListNotations.
 
 (** Basic tactics *)
 
-Ltac ctx' := tryif (left; reflexivity) then idtac else (right; ctx').
-Ltac ctx := apply Ctx; ctx'.
+(* Ltac ctx' := tryif (left; reflexivity) then idtac else (right; ctx').
+Ltac ctx := apply Ctx; ctx'. *)
+Ltac ctx := apply Ctx; firstorder.
 
 Ltac fexfalso := apply Exp.
 Ltac fsplit := apply CI.
@@ -293,11 +294,11 @@ Section FullLogic.
       * fapply ax_eq_mult; apply IH. right. left. left.
   Qed.
 
-  Lemma leibniz phi t t' :
-    FA ⊢ (t == t') -> FA ⊢ phi[t..] -> FA ⊢ phi[t'..].
+  Lemma leibniz A phi t t' :
+    FA <<= A -> A ⊢ (t == t') -> A ⊢ phi[t..] -> A ⊢ phi[t'..].
   Proof.
-    revert t t'. 
-    enough (forall t t', FA ⊢ (t == t') -> FA ⊢ (phi[t..] --> phi[t'..])) as H0.
+    intros X. revert t t'. 
+    enough (forall t t', A ⊢ (t == t') -> A ⊢ (phi[t..] --> phi[t'..])) as H0.
     { intros. specialize (H0 t t' H). fapply (H0 H1). }
     induction phi; cbn; intros. 1-3: fintros.
     - ctx.
@@ -313,7 +314,7 @@ Section FullLogic.
         * fleft. fapply IHphi1. ctx.
         * fright. fapply IHphi2. ctx.
       + fintros. specialize (IHphi2 t t' H). fapply IHphi2. 
-        fapply 1. assert (FA ⊢ (t' == t)) as H' by now fapply ax_sym.
+        fapply 1. assert (A ⊢ (t' == t)) as H' by now fapply ax_sym.
         specialize (IHphi1 t' t H'). fapply IHphi1. ctx.
     - destruct q.
       + 
@@ -322,8 +323,8 @@ Section FullLogic.
         assert (forall (t t' : term) u1 u2, FA ⊢ (t == t') -> FA ⊢ (phi[u1][t..][u2] --> phi[u1][t'..][u2])) as IH' by admit. *)
 
         intros. fintros. 
-        change (((∀ phi)[t..][↑] :: map (subst_form ↑) FA) ⊢ phi[up t'..]).
-        change ((∀ phi[up t..][up ↑] :: map (subst_form ↑) FA) ⊢ phi[up t'..]).
+        change (((∀ phi)[t..][↑] :: map (subst_form ↑) A) ⊢ phi[up t'..]).
+        change ((∀ phi[up t..][up ↑] :: map (subst_form ↑) A) ⊢ phi[up t'..]).
         (* ? *)
   Admitted.
 
@@ -382,7 +383,17 @@ Section FullLogic.
       end;
 
       (* 3. Change [t..] to [t'...] using leibniz *)
-      apply leibniz with (t := t'); [ now fapply ax_sym |];
+      tryif apply (leibniz FA) with (t := t'); [ firstorder | now fapply ax_sym |] then idtac
+      else (
+        let L := fresh "L" in
+        assert (L := leibniz);
+        match goal with [ |- ?U ⊢ ?s[t..] ] => 
+          specialize (L U s t' t);
+          eapply (Weak _ U) in L;
+          [ apply L | firstorder | fapply ax_sym; ctx | | now intros ? ]
+        end;
+        clear L
+      );
 
       (* 4. Pull substitutions inward *)
       cbn;
@@ -415,4 +426,8 @@ Section FullLogic.
     intros. frewrite H. fapply ax_add_zero.
   Qed.
 
+  Goal forall t t', FA ⊢ (t == t' --> zero ⊕ σ t == σ t').
+  Proof.
+    intros. fintros. frewrite 0. fapply ax_add_zero.
+  Qed.
     
