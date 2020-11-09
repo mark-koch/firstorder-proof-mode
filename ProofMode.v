@@ -328,3 +328,91 @@ Section FullLogic.
   Admitted.
 
   
+  
+  
+
+
+  (* Returns a new formula where all occurences of "t" are turned into *)
+  (* "($0)[t..]" and every other *)
+  Ltac add_shifts G t := (* TODO: Quantors :( *)
+    let f := add_shifts in 
+    match G with
+    | t => constr:(($0)[t..])
+    | $(?n) => constr:(($n)[↑][t..])
+    | ?u --> ?v => let u' := f u t in let v' := f v t in constr:(u' --> v')
+    | ?u ∧ ?v => let u' := f u t in let v' := f v t in constr:(u' ∧ v')
+    | ?u ∨ ?v => let u' := f u t in let v' := f v t in constr:(u' ∨ v')
+    | ?u ⊕ ?v => let u' := f u t in let v' := f v t in constr:(u' ⊕ v')
+    | ?u ⊗ ?v => let u' := f u t in let v' := f v t in constr:(u' ⊗ v')
+    | ?u == ?v => let u' := f u t in let v' := f v t in constr:(u' == v')
+    | σ ?u => let u' := f u t in  constr:(σ u')
+    | ?u => constr:(u[↑][t..]) 
+            (* TODO: Why doesn't this work: *) (* tryif is_var u then constr:(u[↑][t..]) else fail *)
+    end.
+
+  (* Returns a new formula where all occurences of "s[↑][t..]" in G are  *)
+  (* turned into "s[↑]" and "($0)[t]" into "$0". *)
+  Ltac remove_shifts G t :=
+    match G with 
+    | context C[ ?s[↑][t..] ] => let G' := context C[ s[↑] ] in remove_shifts G' t
+    | context C[ ($0)[t..] ] => let G' := context C[ $0 ] in remove_shifts G' t
+    | _ => G
+    end.
+
+  Ltac frewrite' T A :=
+    let H := fresh "H" in
+    turn_into_hypothesis T H;
+    fspecialize_list H A; 
+    instantiate_evars H; 
+    simpl_subst H;
+    match type of H with _ ⊢ (?t == ?t') =>
+      (* 1. Replace each occurence of "t" with "($0)[t..]" and every other *)
+      (*  "s" with "s[↑][t..]". The new formula is created with the [add_shifts] *)
+      (*  tactic and proven with the shift lemmas. *)
+      match goal with [ |- ?C ⊢ ?G ] => 
+        let X := fresh in 
+        let G' := add_shifts G t in
+        enough (C ⊢ G') as X;
+        [ try rewrite !subst_shift in X; try rewrite !subst_term_shift in X; apply X |]
+      end;
+
+      (* 2. Pull out the [t..] substitution *)
+      match goal with [ |- ?U ⊢ ?G ] =>
+        let G' := remove_shifts G t in change (U ⊢ G'[t..])
+      end;
+
+      (* 3. Change [t..] to [t'...] using leibniz *)
+      apply leibniz with (t := t'); [ now fapply ax_sym |];
+
+      (* 4. Pull substitutions inward *)
+      cbn;
+
+      (* 5. Turn subst_term calls back into []-Notation *)
+      repeat match goal with [ |- context C[subst_term t'.. ?s[↑]] ] =>
+        let G' := context C[ s[↑][t'..] ] in change G'
+      end;
+
+      (* 6. Simplify *)
+      try rewrite !subst_shift;
+      try rewrite !subst_term_shift;
+      repeat match goal with [ |- context C[func Zero (Vector.nil term)] ] =>
+        let G' := context C[zero] in change G'
+      end
+    end;
+    clear H.
+  
+  Tactic Notation "frewrite" constr(T) := frewrite' T constr:([] : list form).
+  Tactic Notation "frewrite" "(" constr(T) constr(x1) ")" := frewrite' T constr:([x1]).
+  Tactic Notation "frewrite" "(" constr(T) constr(x1) constr(x2) ")" := frewrite' T constr:([x1;x2]).
+  Tactic Notation "frewrite" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := frewrite' T constr:([x1;x2;x3]).
+    
+
+
+
+
+  Goal forall t t', FA ⊢ (t == t') -> FA ⊢ (zero ⊕ σ t == σ t').
+  Proof.
+    intros. frewrite H. fapply ax_add_zero.
+  Qed.
+
+    
