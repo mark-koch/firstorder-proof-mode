@@ -10,23 +10,58 @@ Require Import Equations.Equations Equations.Prop.DepElim.
 Import ListNotations.
 
 
+
+(* Wrapper around prv to use custom notation only in the goal *)
+Inductive pm {p cf cp} A phi := PM : @prv p cf cp A phi -> pm A phi.
+Definition pm2prv {p cf cp} A phi : pm A phi -> @prv p cf cp A phi := fun p => match p with PM _ _ x => x end.
+Definition prv2pm {p cf cp} A phi : @prv p cf cp A phi -> pm A phi := fun x => PM A phi x.
+
+(* The context notation gets a new scope that is only applied in pm terms. *)
+(* Otherwise all lists would be printed that way.  *)
+Declare Scope context_scope.
+Arguments pm _ _ _ _%context_scope.
+Arguments cons _ _ _%context_scope.
+
+Notation "" := nil (only printing) : context_scope.
+Notation "H A" := (cons H A)
+  (at level 1, A at level 200, H at level 200,
+  left associativity, format "'[' H ']' '//' A", only printing) : context_scope.
+
+Notation " A '⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯' phi" :=
+  (pm A phi)
+  (at level 1, left associativity,
+  format "A '//' '⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯' '//' phi", only printing).
+
+(* Tactics to toggle notation in the goal *)
+Ltac fstart := apply pm2prv.
+Ltac fstop := apply prv2pm.
+
+(* All the tactics defined below work with the original "prv" type. *)
+(* The following tactic lifts them to be compatible with "pm". *)
+Ltac make_compatible tac :=
+  match goal with
+  | [ |- pm _ _ ] => fstop; tac; fstart
+  | _ => tac
+  end.
+
+
 (** Basic tactics *)
 
 (* Ltac ctx' := tryif (left; reflexivity) then idtac else (right; ctx').
 Ltac ctx := apply Ctx; ctx'. *)
-Ltac ctx := apply Ctx; firstorder.
+Ltac ctx := make_compatible ltac:(apply Ctx; firstorder).
 
-Ltac fexfalso := apply Exp.
-Ltac fsplit := apply CI.
-Ltac fleft := apply DI1.
-Ltac fright := apply DI2.
+Ltac fexfalso := make_compatible ltac:(apply Exp).
+Ltac fsplit := make_compatible ltac:(apply CI).
+Ltac fleft := make_compatible ltac:(apply DI1).
+Ltac fright := make_compatible ltac:(apply DI2).
 
-Ltac fintro := 
+Ltac fintro := make_compatible ltac:(
   match goal with 
   | [ |- ?A ⊢ ∀ ?t ] => apply AllI
   | [ |- ?A ⊢ (?s --> ?t) ] => apply II
-  end.
-Ltac fintros := repeat fintro.
+  end).
+Ltac fintros := make_compatible ltac:(repeat fintro).
 
 
 (* Lemma fintro_help A s t :
@@ -49,7 +84,7 @@ Ltac fintros := repeat (let H := fresh "H" in fintro H). *)
 
   Lifts the n'th assumption in the ND context to a Coq hypothesis.
 *)
-Ltac ctx2hyp'' n H A :=
+Ltac ctx2hyp'' n H A := 
   match n with
   | 0 => match A with ?t::_ => assert ([t] ⊢ t) as H by ctx end
   | S ?n' => match A with _::?A' => ctx2hyp'' n' H A' end
@@ -58,7 +93,7 @@ Ltac ctx2hyp'' n H A :=
 Ltac ctx2hyp' n H :=
   match goal with [ |- ?A ⊢ _ ] => ctx2hyp'' n H A end.
 
-Tactic Notation "ctx2hyp" integer(n) "as" reference(H) := ctx2hyp' n H.
+Tactic Notation "ctx2hyp" integer(n) "as" reference(H) := make_compatible ltac:(ctx2hyp' n H).
 
 
 
@@ -96,13 +131,13 @@ Ltac fspecialize_list H A :=
     fspecialize_list H A'
   end.
 
-Tactic Notation "fspecialize" "(" hyp(H) constr(x1) ")" := fspecialize_list H constr:([x1]).
-Tactic Notation "fspecialize" "(" hyp(H) constr(x1) constr(x2) ")" := fspecialize_list H constr:([x1; x2]).
-Tactic Notation "fspecialize" "(" hyp(H) constr(x1) constr(x2) constr(x3) ")" := fspecialize_list H constr:([x1;x2;x3]).
+Tactic Notation "fspecialize" "(" hyp(H) constr(x1) ")" := make_compatible ltac:(fspecialize_list H constr:([x1])).
+Tactic Notation "fspecialize" "(" hyp(H) constr(x1) constr(x2) ")" := make_compatible ltac:(fspecialize_list H constr:([x1; x2])).
+Tactic Notation "fspecialize" "(" hyp(H) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(fspecialize_list H constr:([x1;x2;x3])).
 
-Tactic Notation "fspecialize" hyp(H) "with" constr(x1) := fspecialize_list H constr:([x1]).
-Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) := fspecialize_list H constr:([x1;x2]).
-Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) constr(x3) := fspecialize_list H constr:([x1;x2;x3]).
+Tactic Notation "fspecialize" hyp(H) "with" constr(x1) := make_compatible ltac:(fspecialize_list H constr:([x1])).
+Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) := make_compatible ltac:(fspecialize_list H constr:([x1;x2])).
+Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) constr(x3) := make_compatible ltac:(fspecialize_list H constr:([x1;x2;x3])).
 
 
 
@@ -182,15 +217,15 @@ Ltac fapply' T A :=
   else clear H.
 
 
-Tactic Notation "feapply" constr(T) := feapply' T constr:([] : list form).
-Tactic Notation "feapply" "(" constr(T) constr(x1) ")" := feapply' T constr:([x1]).
-Tactic Notation "feapply" "(" constr(T) constr(x1) constr(x2) ")" := feapply' T constr:([x1;x2]).
-Tactic Notation "feapply" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := feapply' T constr:([x1;x2;x3]).
+Tactic Notation "feapply" constr(T) := make_compatible ltac:(feapply' T constr:([] : list form)).
+Tactic Notation "feapply" "(" constr(T) constr(x1) ")" := make_compatible ltac:(feapply' T constr:([x1])).
+Tactic Notation "feapply" "(" constr(T) constr(x1) constr(x2) ")" := make_compatible ltac:(feapply' T constr:([x1;x2])).
+Tactic Notation "feapply" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(feapply' T constr:([x1;x2;x3])).
 
-Tactic Notation "fapply" constr(T) := fapply' T constr:([] : list form).
-Tactic Notation "fapply" "(" constr(T) constr(x1) ")" := fapply' T constr:([x1]).
-Tactic Notation "fapply" "(" constr(T) constr(x1) constr(x2) ")" := fapply' T constr:([x1;x2]).
-Tactic Notation "fapply" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := fapply' T constr:([x1;x2;x3]).
+Tactic Notation "fapply" constr(T) := make_compatible ltac:(fapply' T constr:([] : list form)).
+Tactic Notation "fapply" "(" constr(T) constr(x1) ")" := make_compatible ltac:(fapply' T constr:([x1])).
+Tactic Notation "fapply" "(" constr(T) constr(x1) constr(x2) ")" := make_compatible ltac:(fapply' T constr:([x1;x2])).
+Tactic Notation "fapply" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(fapply' T constr:([x1;x2;x3])).
 
 
 
@@ -214,19 +249,19 @@ Section FullLogic.
   *)
 
   Lemma fdestruct_and A s t G :
-  (s::t::A) ⊢ G -> (s ∧ t::A) ⊢ G.
+    (s::t::A) ⊢ G -> (s ∧ t::A) ⊢ G.
   Proof.
-  intros. apply switch_imp. apply switch_conj_imp. 
-  repeat apply <- switch_imp. fapply H.
+    intros. apply switch_imp. apply switch_conj_imp. 
+    repeat apply <- switch_imp. fapply H.
   Qed.
 
   Lemma fdestruct_or A s t G :
-  (s::A) ⊢ G -> (t::A) ⊢ G -> (s ∨ t::A) ⊢ G.
+    (s::A) ⊢ G -> (t::A) ⊢ G -> (s ∨ t::A) ⊢ G.
   Proof.
-  intros Hs Ht. eapply DE. ctx. fapply Hs. fapply Ht.
+    intros Hs Ht. eapply DE. ctx. fapply Hs. fapply Ht.
   Qed.
 
-  Ltac fdestruct n :=
+  Ltac fdestruct n := make_compatible ltac:(
   match n with
   | 0 => 
     match goal with 
@@ -234,7 +269,7 @@ Section FullLogic.
     | [ |- (?s ∨ ?t :: ?A) ⊢ ?G ] => apply fdestruct_or
     end
   | S ?n' => idtac "TODO"
-  end.
+  end).
 
 
 
@@ -263,7 +298,7 @@ Section FullLogic.
     FA ⊢ (num x ⊕ num y == num (x + y)).
   Proof.
     induction x; cbn.
-    - fapply ax_add_zero.
+    - fapply ax_add_zero.  (* Arguments are infered! *)
     - feapply ax_trans.
       + feapply ax_eq_succ. exact IHx.
       + fapply ax_add_rec.
@@ -334,7 +369,7 @@ Section FullLogic.
 
 
   (* Returns a new formula where all occurences of "t" are turned into *)
-  (* "($0)[t..]" and every other *)
+  (* "($0)[t..]" and every other term "s" into "s[↑][t..]". *)
   Ltac add_shifts G t := (* TODO: Quantors :( *)
     let f := add_shifts in 
     match G with
@@ -427,15 +462,11 @@ Section FullLogic.
 
 
 
-  Goal forall t t', FA ⊢ (t == t') -> FA ⊢ (zero ⊕ σ t == σ t').
-  Proof.
-    intros. frewrite H. fapply ax_add_zero.
-  Qed.
 
-  Goal forall t t', FA ⊢ (t == t' --> zero ⊕ σ t == σ t').
-  Proof.
-    intros. fintros. frewrite 0. fapply ax_add_zero.
-  Qed.
+
+
+
+  (* With [frewrite] the proofs from above get even shorter! *)
 
   Lemma num_add_homomorphism' x y :
     FA ⊢ (num x ⊕ num y == num (x + y)).
@@ -444,7 +475,7 @@ Section FullLogic.
     - fapply ax_add_zero.
     - frewrite <- IHx. fapply ax_add_rec.
   Qed.
-    
+
   Lemma num_mult_homomorphism' x y : FA ⊢ ( num x ⊗ num y == num (x * y) ).
   Proof.
     induction x; cbn.
@@ -453,4 +484,18 @@ Section FullLogic.
       frewrite IHx. apply num_add_homomorphism'.
   Qed.
 
-    
+
+  (* Rewrite directly from the context: *)
+  Goal forall t t', FA ⊢ (t == t' --> zero ⊕ σ t == σ t').
+  Proof.
+    intros. fintros. frewrite 0. fapply ax_add_zero.
+  Qed.
+
+
+  (* Nice context notation using [fstart] *)
+  Goal forall a b c, FA ⊢ (a --> (a --> b) --> (b --> c) --> c).
+  Proof.
+    intros. fstart. fintros. fapply 0. fapply 1. ctx.
+  Qed.
+
+
