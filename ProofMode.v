@@ -449,15 +449,15 @@ Section FullLogic.
     end;
     clear H.
   
-  Tactic Notation "frewrite" constr(T) := frewrite' T constr:([] : list form) constr:(false).
-  Tactic Notation "frewrite" "(" constr(T) constr(x1) ")" := frewrite' T constr:([x1]) constr:(false).
-  Tactic Notation "frewrite" "(" constr(T) constr(x1) constr(x2) ")" := frewrite' T constr:([x1;x2]) constr:(false).
-  Tactic Notation "frewrite" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := frewrite' T constr:([x1;x2;x3]) constr:(false).
+  Tactic Notation "frewrite" constr(T) := make_compatible ltac:(frewrite' T constr:([] : list form) constr:(false)).
+  Tactic Notation "frewrite" "(" constr(T) constr(x1) ")" := make_compatible ltac:(frewrite' T constr:([x1]) constr:(false)).
+  Tactic Notation "frewrite" "(" constr(T) constr(x1) constr(x2) ")" := make_compatible ltac:(frewrite' T constr:([x1;x2]) constr:(false)).
+  Tactic Notation "frewrite" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(frewrite' T constr:([x1;x2;x3]) constr:(false)).
   
-  Tactic Notation "frewrite" "<-" constr(T) := frewrite' T constr:([] : list form) constr:(true).
-  Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) ")" := frewrite' T constr:([x1]) constr:(true).
-  Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) constr(x2) ")" := frewrite' T constr:([x1;x2]) constr:(true).
-  Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := frewrite' T constr:([x1;x2;x3]) constr:(true).
+  Tactic Notation "frewrite" "<-" constr(T) := make_compatible ltac:(frewrite' T constr:([] : list form) constr:(true)).
+  Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) ")" := make_compatible ltac:(frewrite' T constr:([x1]) constr:(true)).
+  Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) constr(x2) ")" := make_compatible ltac:(frewrite' T constr:([x1;x2]) constr:(true)).
+  Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(frewrite' T constr:([x1;x2;x3]) constr:(true)).
 
 
 
