@@ -6,102 +6,214 @@ Require Import PA.
 Require Import List.
 Require Import Lia.
 Require Import List.
+Require Import String.
 Require Import Equations.Equations Equations.Prop.DepElim.
 Import ListNotations.
 
+Open Scope string_scope.
+
+(* 
+  I want to have an Iris-like proof mode, where the context is displayed
+  above a line with the current goal below. Also the assumptions should
+  have names.
+
+  This is not possible using the `prv` type. Thus the plan is to embedd
+  deductions into another type `pm` that contains additional information.
+
+  Note that this mode is strictly optional! All of the apply, rewrite, etc.
+  tactics defined below work on the `prv` type and are lifted to `pm` on
+  demand.
+*)
 
 
-(* Wrapper around prv to use custom notation only in the goal *)
-Inductive pm {p cf cp} A phi := PM : @prv p cf cp A phi -> pm A phi.
-Definition pm2prv {p cf cp} A phi : pm A phi -> @prv p cf cp A phi := fun p => match p with PM _ _ x => x end.
-Definition prv2pm {p cf cp} A phi : @prv p cf cp A phi -> pm A phi := fun x => PM A phi x.
+(* Extended formula list with names *)
+Inductive context := 
+  | cnil 
+  | ccons : string -> form -> context -> context
+  | cblackbox : list form -> context.  (* For unknown lists, we don't want to look into *)
 
-(* The context notation gets a new scope that is only applied in pm terms. *)
-(* Otherwise all lists would be printed that way.  *)
-Declare Scope context_scope.
-Arguments pm _ _ _ _%context_scope.
-Arguments cons _ _ _%context_scope.
 
-Notation "" := nil (only printing) : context_scope.
-Notation "H A" := (cons H A)
-  (at level 1, A at level 200, H at level 200,
-  left associativity, format "'[' H ']' '//' A", only printing) : context_scope.
+(** Context utilities *)
 
-Notation " A '⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯' phi" :=
-  (pm A phi)
+Definition digit_to_string n := match n with
+  | 0 => "0" | 1 => "1" | 2 => "2" | 3 => "3" | 4 => "4" | 5 => "5" 
+  | 6 => "6" | 7 => "7" | 8 => "8" | 9 => "9" | _ => "_"
+end.
+Fixpoint nat_to_string' fuel n := match fuel with
+  | 0 => "OUT OF FUEL"
+  | S fuel' => match n with
+    | 0 => ""
+    | _ =>  nat_to_string' fuel' (Nat.div n 10)  ++ digit_to_string (Nat.modulo n 10)
+    end
+end.
+Definition nat_to_string n := match n with 0 => "0" | _ => nat_to_string' 100 n end.
+
+(* Returns the index of the first occurence of `name` in the 
+ * context `C`, or `None` if it doesn't exist. *)
+Fixpoint lookup' n C name :=
+  match C with
+  | ccons s _ C' => if string_dec s name then Some n else lookup' (S n) C' name
+  | _ => None
+  end.
+Definition lookup := lookup' 0.
+
+(* Finds the first name of form `H`, `H0`, `H1`, ... thats not 
+ * contained in the context `C`. *)
+Fixpoint new_name' n C fuel := match fuel with
+  | 0 => "OUT OF FUEL"
+  | S fuel' =>
+    let name := match n with 0 => "H" | S n' => "H" ++ nat_to_string n' end in
+    match lookup C name with
+    | None => name
+    | Some _ => new_name' (S n) C fuel'
+    end
+end.
+Definition new_name C := new_name' 0 C 100.
+
+(* For context creation we need to give names to the initial formulas.
+ * This is done using syntactic matching with ltac instead of a Galina
+ * function, because if we want to prove `A ⊢ φ` for an unknown A we 
+ * don't want to go into the `A`. *)
+Ltac create_context' A :=
+  match A with
+  | ?phi::?A' =>
+    let x := create_context' A' in match x with (?c, ?n) =>
+      match n with
+        | 0 => constr:((ccons "H" phi c, S n))
+        | S ?n' => let s' := eval cbn in ("H" ++ nat_to_string n') in constr:((ccons s' phi c, S n))
+      end
+    end
+  | nil => constr:((cnil, 0))
+  | _ => 
+    (* If it's not a cons or nil, it's a variable/function call/... 
+     * and we don't want to look into it *)
+    constr:((cblackbox A, 0))
+  end.
+Ltac create_context A := let x := create_context' A in match x with (?c, _) => c end.
+
+
+
+(* `pm` embedds a `prv` derivation together with a context *)
+Inductive pm {p cf cp} (C: context) A phi := PM : @prv p cf cp A phi -> pm C A phi.
+
+Definition pm2prv {p cf cp} C A phi : pm C A phi -> @prv p cf cp A phi := fun p => match p with PM _ _ _ x => x end.
+Definition prv2pm {p cf cp} C A phi : @prv p cf cp A phi -> pm C A phi := fun x => PM C A phi x.
+
+(* Declare Scope context_scope.
+Delimit Scope context_scope with env.
+Notation "" := EmptyString (only printing) : context_scope.
+Notation "c ,, S" := (String c S) (at level 200, left associativity, only printing, format "c ,, S") : context_scope.
+Arguments ccons _%context_scope _ _.
+Open Scope context_scope. *)
+
+Notation "" := cnil (only printing).
+Notation "A" := (cblackbox A) (at level 1, only printing, format " A").
+Notation "C name : phi" := (ccons name phi C)
+  (at level 1, C at level 200, phi at level 200,
+  left associativity, format "C '//'  name  :  '[' phi ']'", only printing).
+
+Arguments pm {_} {_} {_} _ {_} _.
+Notation " C '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' phi" :=
+  (pm C phi)
   (at level 1, left associativity,
-  format "A '//' '⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯' '//' phi", only printing).
+  format "C '//' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' '//'  phi", only printing).
 
-(* Tactics to toggle notation in the goal *)
-Ltac fstart := apply pm2prv.
+
+(* Tactics to toggle proof mode *)
+Ltac fstart := match goal with [ |- ?A ⊢ _ ] => let C := create_context A in apply (pm2prv C) end.
 Ltac fstop := apply prv2pm.
 
-(* All the tactics defined below work with the original "prv" type. *)
-(* The following tactic lifts them to be compatible with "pm". *)
+
+(* All the tactics defined below work with the original `prv` type.
+ * The following tactic lifts them to be compatible with `pm`.
+ *
+ * Every tactic must have an additional argument where the current
+ * context is filled in if the proof mode is active, and `cnil` 
+ * otherwise. *)
 Ltac make_compatible tac :=
   match goal with
-  | [ |- pm _ _ ] => fstop; tac; fstart
-  | _ => tac
+  | [ |- pm ?C _ ] => apply prv2pm; tac C; apply (pm2prv C)
+  | _ => tac cnil
   end.
+
 
 
 (** Basic tactics *)
 
-(* Ltac ctx' := tryif (left; reflexivity) then idtac else (right; ctx').
-Ltac ctx := apply Ctx; ctx'. *)
-Ltac ctx := make_compatible ltac:(apply Ctx; firstorder).
+Ltac ctx := make_compatible ltac:(fun _ => apply Ctx; firstorder).
 
-Ltac fexfalso := make_compatible ltac:(apply Exp).
-Ltac fsplit := make_compatible ltac:(apply CI).
-Ltac fleft := make_compatible ltac:(apply DI1).
-Ltac fright := make_compatible ltac:(apply DI2).
+Ltac fexfalso := make_compatible ltac:(fun _ => apply Exp).
+Ltac fsplit := make_compatible ltac:(fun _ => apply CI).
+Ltac fleft := make_compatible ltac:(fun _ => apply DI1).
+Ltac fright := make_compatible ltac:(fun _ => apply DI2).
 
-Ltac fintro := make_compatible ltac:(
+
+(* 
+ * [fintro], [fintros] 
+ * 
+ * Similar to Coq. Identifiers need to be given as strings (e.g. 
+ * [fintros "H1" "H2"]). With "?" you can automatically generate
+ * a name (e.g. [fintros "?" "H"])  
+ *)
+Ltac fintro' id :=
   match goal with 
   | [ |- ?A ⊢ ∀ ?t ] => apply AllI
   | [ |- ?A ⊢ (?s --> ?t) ] => apply II
-  end).
-Ltac fintros := make_compatible ltac:(repeat fintro).
-
-
-(* Lemma fintro_help A s t :
-  ((s::A) ⊢ s -> (s::A) ⊢ t) -> A ⊢ (s --> t).
-Proof.
-  intros. apply II. assert ((s::A) ⊢ s). ctx.
-  eapply Weak. apply H. assumption. firstorder.
-Qed.
-
-Ltac fintro H := 
-  match goal with 
-  | [ |- ?A ⊢ ∀ ?t ] => apply AllI
-  | [ |- ?A ⊢ (?s --> ?t) ] => apply fintro_help; intros H
+  (* Special care for intro in proof mode *)
+  | [ |- pm ?C (∀ ?t) ] => make_compatible ltac:(apply AllI)
+  | [ |- pm ?C (?s --> ?t) ] =>
+      apply prv2pm; 
+      apply II;
+      let name := 
+        match id with 
+        | "?" => eval cbn in (new_name C)
+        | _ => match eval cbn in (lookup C id) with
+          | None => id
+          | Some _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 2 msg
+          end
+        end
+      in apply (pm2prv (ccons name s C))
   end.
+Tactic Notation "fintro" := fintro' constr:("?").
+Tactic Notation "fintro" constr(H) := fintro' H.
+Tactic Notation "fintros" := repeat fintro.
 
-Ltac fintros := repeat (let H := fresh "H" in fintro H). *)
+Ltac fintros' ids := 
+  match ids with
+  | [] => idtac 
+  | ?id::?ids' => fintro id; fintros' ids'
+  end.
+Tactic Notation "fintros" constr(H1) := fintros' constr:([H1]).
+Tactic Notation "fintros" constr(H1) constr(H2) := fintros' constr:([H1;H2]).
+Tactic Notation "fintros" constr(H1) constr(H2) constr(H3) := fintros' constr:([H1;H2;H3]).
+Tactic Notation "fintros" constr(H1) constr(H2) constr(H3) constr(H4) := fintros' constr:([H1;H2;H3;H4]).
 
 
-(** [ctx2hyp n as H]
 
-  Lifts the n'th assumption in the ND context to a Coq hypothesis.
-*)
-Ltac ctx2hyp'' n H A := 
+(* 
+ * [ctx2hyp n as H]
+ *
+ * Lifts the n'th assumption in the ND context to a Coq hypothesis.
+ *)
+Ltac ctx2hyp'' n H A := fun _ => 
   match n with
   | 0 => match A with ?t::_ => assert ([t] ⊢ t) as H by ctx end
   | S ?n' => match A with _::?A' => ctx2hyp'' n' H A' end
   end.
 
-Ltac ctx2hyp' n H :=
+Ltac ctx2hyp' n H := fun _ => 
   match goal with [ |- ?A ⊢ _ ] => ctx2hyp'' n H A end.
 
 Tactic Notation "ctx2hyp" integer(n) "as" reference(H) := make_compatible ltac:(ctx2hyp' n H).
 
 
 
-(** [fspecialize (H x1 x2 ... xn)] or [fspecialize H with x1 x2 ... xn] 
-  
-  Specializes a hypothesis H of the form [X ⊢ ∀∀...∀ p1 --> ... --> pn --> g] 
-  with x1, x2, ..., xn.
-*)
+(* 
+ * [fspecialize (H x1 x2 ... xn)], [fspecialize H with x1 x2 ... xn] 
+ * 
+ * Specializes a Coq hypothesis `H` of the form `X ⊢ ∀∀...∀ p1 --> ... --> pn --> g`
+ * with `x1, x2, ..., xn`.
+ *)
 
 (* Spimplify terms that occur during specialization  *)
 Ltac simpl_subst H :=
@@ -131,29 +243,32 @@ Ltac fspecialize_list H A :=
     fspecialize_list H A'
   end.
 
-Tactic Notation "fspecialize" "(" hyp(H) constr(x1) ")" := make_compatible ltac:(fspecialize_list H constr:([x1])).
-Tactic Notation "fspecialize" "(" hyp(H) constr(x1) constr(x2) ")" := make_compatible ltac:(fspecialize_list H constr:([x1; x2])).
-Tactic Notation "fspecialize" "(" hyp(H) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(fspecialize_list H constr:([x1;x2;x3])).
+Tactic Notation "fspecialize" "(" hyp(H) constr(x1) ")" := make_compatible ltac:(fun _ => fspecialize_list H constr:([x1])).
+Tactic Notation "fspecialize" "(" hyp(H) constr(x1) constr(x2) ")" := make_compatible ltac:(fun _ => fspecialize_list H constr:([x1; x2])).
+Tactic Notation "fspecialize" "(" hyp(H) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(fun _ => fspecialize_list H constr:([x1;x2;x3])).
 
-Tactic Notation "fspecialize" hyp(H) "with" constr(x1) := make_compatible ltac:(fspecialize_list H constr:([x1])).
-Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) := make_compatible ltac:(fspecialize_list H constr:([x1;x2])).
-Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) constr(x3) := make_compatible ltac:(fspecialize_list H constr:([x1;x2;x3])).
-
-
+Tactic Notation "fspecialize" hyp(H) "with" constr(x1) := make_compatible ltac:(fun _ => fspecialize_list H constr:([x1])).
+Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) := make_compatible ltac:(fun _ => fspecialize_list H constr:([x1;x2])).
+Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) constr(x3) := make_compatible ltac:(fun _ => fspecialize_list H constr:([x1;x2;x3])).
 
 
-(** [fapply (H x1 ... xn)], [feapply (H x1 ... xn)]
-  
-  Works on
-  - Coq hypothesis by name
-  - Formula in in ND context by index or explicit formula: [fapply 3], [fapply ax_symm]
-*)
+
+
+(*
+ * [fapply (H x1 ... xn)], [feapply (H x1 ... xn)]
+ *  
+ * Works on
+ * - Coq hypothesis by name
+ * - Formula in in ND context by index (e.g. [fapply 3])
+ * - Explicit formula type in the context (e.g. [fapply ax_symm])
+ * - Name of a context assumption in proof mode (e.g. [fapply "H2"])
+ *)
 
 (* Helper tactics: *)
 
-(* [fapply_without_quant] takes a formula [H : X ⊢ p1 --> p2 --> ... --> pn --> g] 
-  without leading quantifiers. It solves the goal [X ⊢ g] by adding subgoals for
-  each premise p1, p2, ..., pn. *)
+(* [fapply_without_quant] takes a formula `H : X ⊢ p1 --> p2 --> ... --> pn --> g`
+ * without leading quantifiers. It solves the goal `X ⊢ g` by adding subgoals for
+ * each premise `p1, p2, ..., pn`. *)
 Ltac fapply_without_quant H :=
   tryif exact H then idtac else
   match type of H with
@@ -174,21 +289,25 @@ Ltac nth A n :=
   | S ?n' => match A with _ :: ?A' => nth A' n' end
   end.
 
-(* Check wether T is a hypothesis, a context index or a context formula
-  and put it into hypothesis H. *)
-Ltac turn_into_hypothesis T H :=
+(* Check wether T is a hypothesis, a context index, a context formula
+ * or a context name and put it into hypothesis H. *)
+Ltac turn_into_hypothesis T H context := 
   tryif is_hyp T
   then assert (H := T)  (* Hypothesis *)
   else match goal with [ |- ?C ⊢ _ ] => 
     match type of T with
     | form => assert (C ⊢ T) as H by ctx  (* Explicit form *)
     | nat => let T' := nth C T in assert (C ⊢ T') as H by ctx  (* Idx in context *)
+    | string => match eval cbn in (lookup context T) with  (* Context name *)
+      | None => let msg := eval cbn in ("Unknown identifier: " ++ T) in fail 4 msg
+      | Some ?n => let T' := nth C n in assert (C ⊢ T') as H by ctx
+      end
     end
   end.
 
-Ltac feapply' T A := 
+Ltac feapply' T A := fun contxt =>
   let H := fresh "H" in
-  turn_into_hypothesis T H;
+  turn_into_hypothesis T H contxt;
   fspecialize_list H A;
   instantiate_evars H;
   simpl_subst H;
@@ -198,9 +317,9 @@ Ltac feapply' T A :=
   fapply_without_quant H;
   clear H.
 
-Ltac fapply' T A := 
+Ltac fapply' T A contxt :=
   let H := fresh "H" in
-  turn_into_hypothesis T H;
+  turn_into_hypothesis T H contxt;
   fspecialize_list H A; 
   instantiate_evars H; 
   simpl_subst H;
@@ -208,12 +327,12 @@ Ltac fapply' T A :=
     eapply (Weak _ U) in H; [| firstorder]
   end;
   fapply_without_quant H;
-  (* Evars should only be used for unification in [fapply]. *)
-  (* Therefore reject, if there are still evars visible. *)
+  (* Evars should only be used for unification in [fapply].
+   * Therefore reject, if there are still evars visible. *)
   (* TODO: This is not optimal. If the goal contains evars, 
-     H might still contain evars after unification and we would fail. *)
+   * H might still contain evars after unification and we would fail. *)
   tryif has_evar ltac:(type of H) 
-  then fail "Cannot find instance for variable. Try feapply?" 
+  then fail 2 "Cannot find instance for variable. Try feapply?" 
   else clear H.
 
 
@@ -240,13 +359,17 @@ Section FullLogic.
   (* Basic tactics *)
   Ltac freflexivity := fapply ax_refl.
 
+  Goal forall a b c, [a;b;c] ⊢ (b-->c-->c).
+  Proof.
+    intros. fstart. fintros. fapply "H".
+  Qed.
 
-
-  (** [fdestruct n]
-
-    Destructs the n'th assumption in the ND context back into
-    the ND context.
-  *)
+  (*
+   * [fdestruct n]
+   *
+   *  Destructs the n'th assumption in the ND context back into
+   * the ND context.
+   *)
 
   Lemma fdestruct_and A s t G :
     (s::t::A) ⊢ G -> (s ∧ t::A) ⊢ G.
@@ -261,15 +384,15 @@ Section FullLogic.
     intros Hs Ht. eapply DE. ctx. fapply Hs. fapply Ht.
   Qed.
 
-  Ltac fdestruct n := make_compatible ltac:(
-  match n with
-  | 0 => 
-    match goal with 
-    | [ |- (?s ∧ ?t :: ?A) ⊢ ?G ] => apply fdestruct_and 
-    | [ |- (?s ∨ ?t :: ?A) ⊢ ?G ] => apply fdestruct_or
-    end
-  | S ?n' => idtac "TODO"
-  end).
+  Ltac fdestruct n := make_compatible ltac:( fun _ =>
+    match n with
+    | 0 => 
+      match goal with 
+      | [ |- (?s ∧ ?t :: ?A) ⊢ ?G ] => apply fdestruct_and 
+      | [ |- (?s ∨ ?t :: ?A) ⊢ ?G ] => apply fdestruct_or
+      end
+    | S ?n' => idtac "TODO"
+    end).
 
 
 
@@ -368,8 +491,8 @@ Section FullLogic.
 
 
 
-  (* Returns a new formula where all occurences of "t" are turned into *)
-  (* "($0)[t..]" and every other term "s" into "s[↑][t..]". *)
+  (* Returns a new formula where all occurences of `t` are turned into
+   * `($0)[t..]` and every other term `s` into `s[↑][t..]`. *)
   Ltac add_shifts G t := (* TODO: Quantors :( *)
     let f := add_shifts in 
     match G with
@@ -386,8 +509,8 @@ Section FullLogic.
             (* TODO: Why doesn't this work: *) (* tryif is_var u then constr:(u[↑][t..]) else fail *)
     end.
 
-  (* Returns a new formula where all occurences of "s[↑][t..]" in G are  *)
-  (* turned into "s[↑]" and "($0)[t]" into "$0". *)
+  (* Returns a new formula where all occurences of `s[↑][t..]` in G are
+   * turned into `s[↑]` and `($0)[t]` into `$0`. *)
   Ltac remove_shifts G t :=
     match G with 
     | context C[ ?s[↑][t..] ] => let G' := context C[ s[↑] ] in remove_shifts G' t
@@ -395,9 +518,9 @@ Section FullLogic.
     | _ => G
     end.
 
-  Ltac frewrite' T A back :=
+  Ltac frewrite' T A back := fun contxt =>
     let H := fresh "H" in
-    turn_into_hypothesis T H;
+    turn_into_hypothesis T H contxt;
     fspecialize_list H A; 
     instantiate_evars H; 
     simpl_subst H;
@@ -405,9 +528,9 @@ Section FullLogic.
       let t := match back with true => _t' | false => _t end in
       let t' := match back with true => _t | false => _t' end in
 
-      (* 1. Replace each occurence of "t" with "($0)[t..]" and every other *)
-      (*  "s" with "s[↑][t..]". The new formula is created with the [add_shifts] *)
-      (*  tactic and proven with the shift lemmas. *)
+      (* 1. Replace each occurence of `t` with `($0)[t..]` and every other
+       *  "s" with "s[↑][t..]". The new formula is created with the [add_shifts]
+       *  tactic and proven with the shift lemmas. *)
       match goal with [ |- ?C ⊢ ?G ] => 
         let X := fresh in 
         let G' := add_shifts G t in
@@ -420,9 +543,9 @@ Section FullLogic.
         let G' := remove_shifts G t in change (U ⊢ G'[t..])
       end;
 
-      (* 3. Change [t..] to [t'...] using leibniz. For some reason  *)
-      (*  we cannot directly [apply leibniz with (t := t')] if t'  *)
-      (*  contains ⊕, σ, etc. But evar seems to work. *)
+      (* 3. Change [t..] to [t'...] using leibniz. For some reason
+       *  we cannot directly [apply leibniz with (t := t')] if t'
+       *  contains ⊕, σ, etc. But evar seems to work. *)
       let t'' := fresh "t" in 
       eapply (leibniz _ _ ?[t'']);
       [ instantiate (t'' := t'); firstorder |
@@ -485,17 +608,17 @@ Section FullLogic.
   Qed.
 
 
-  (* Rewrite directly from the context: *)
+
+  (* Proof mode demo: *)
+
   Goal forall t t', FA ⊢ (t == t' --> zero ⊕ σ t == σ t').
   Proof.
-    intros. fintros. frewrite 0. fapply ax_add_zero.
+    intros. fstart. fintros. frewrite "H". fapply ax_add_zero.
   Qed.
 
-
-  (* Nice context notation using [fstart] *)
-  Goal forall a b c, FA ⊢ (a --> (a --> b) --> (b --> c) --> c).
+  Goal forall a b c, [] ⊢ (a --> (a --> b) --> (b --> c) --> c).
   Proof.
-    intros. fstart. fintros. fapply 0. fapply 1. ctx.
+    intros. fstart. fintros. fapply "H1". fapply "H0". fapply "H".
   Qed.
 
 
