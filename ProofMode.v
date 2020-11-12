@@ -622,3 +622,25 @@ Section FullLogic.
   Qed.
 
 
+  (* Rewrite under ∀ test: *)
+
+  Lemma subst_term_up_shift (s : term) t :
+    s[up ↑][up t..] = s.
+  Proof.
+    rewrite subst_term_comp. apply subst_term_id. intros. destruct n; cbn; reflexivity.
+  Qed.
+
+  Goal forall t t', FA ⊢ (t == t') -> FA ⊢ ∀ $0 ⊕ σ t[↑] == t' ⊕ σ $0.
+  Proof.
+    intros.
+    enough (FA ⊢ ∀ ($0)[up ↑][up t..] ⊕ σ ($0)[↑][up t..] == t'[up ↑][up t..] ⊕ σ ($0)[up ↑][up t..]) as X
+    by now rewrite !subst_term_up_shift in X; rewrite up_term in X.
+    change (FA ⊢ (∀ ($0)[up ↑] ⊕ σ ($0)[↑] == t'[up ↑] ⊕ σ ($0)[up ↑])[t..]).
+    
+    apply leibniz with (t := t'). firstorder. now fapply ax_sym.
+
+    cbn.
+    change (FA ⊢ ∀ $0 ⊕ σ t'[↑] == t'[up ↑][up t'..] ⊕ σ $0).
+    enough (FA ⊢ ∀ $0 ⊕ σ t'[↑] == t' ⊕ σ $0) by now rewrite subst_term_up_shift.
+  Abort.
+    
