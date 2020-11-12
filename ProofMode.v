@@ -99,13 +99,6 @@ Inductive pm {p cf cp} (C: context) A phi := PM : @prv p cf cp A phi -> pm C A p
 Definition pm2prv {p cf cp} C A phi : pm C A phi -> @prv p cf cp A phi := fun p => match p with PM _ _ _ x => x end.
 Definition prv2pm {p cf cp} C A phi : @prv p cf cp A phi -> pm C A phi := fun x => PM C A phi x.
 
-(* Declare Scope context_scope.
-Delimit Scope context_scope with env.
-Notation "" := EmptyString (only printing) : context_scope.
-Notation "c ,, S" := (String c S) (at level 200, left associativity, only printing, format "c ,, S") : context_scope.
-Arguments ccons _%context_scope _ _.
-Open Scope context_scope. *)
-
 Notation "" := cnil (only printing).
 Notation "A" := (cblackbox A) (at level 1, only printing, format " A").
 Notation "C name : phi" := (ccons name phi C)
@@ -359,10 +352,6 @@ Section FullLogic.
   (* Basic tactics *)
   Ltac freflexivity := fapply ax_refl.
 
-  Goal forall a b c, [a;b;c] ⊢ (b-->c-->c).
-  Proof.
-    intros. fstart. fintros. fapply "H".
-  Qed.
 
   (*
    * [fdestruct n]
