@@ -13,24 +13,25 @@ Import ListNotations.
 Open Scope string_scope.
 
 (* 
-  I want to have an Iris-like proof mode, where the context is displayed
-  above a line with the current goal below. Also the assumptions should
-  have names.
+ * I want to have an Iris-like proof mode, where the context is displayed
+ * above a line with the current goal below. Also the assumptions should
+ * have names.
+ * This is all done using notation. But this notation should only be applied
+ * in the goal, not in other hypothesis. Therefore I define aliases for 
+ * `prv` and lists that the notation can match for. Also the list alias
+ * holds the assumption names as an extra argument.
+ *)
 
-  This is not possible using the `prv` type. Thus the plan is to embedd
-  deductions into another type `pm` that contains additional information.
+(* TODO: Only caveat: [hnf] unfolds `pm` :( *)
 
-  Note that this mode is strictly optional! All of the apply, rewrite, etc.
-  tactics defined below work on the `prv` type and are lifted to `pm` on
-  demand.
-*)
+Definition pm {p cf cp} C phi := @prv p cf cp C phi.
+Arguments pm {_} {_} {_} _ _.
 
+Definition cnil := @nil form.
+Definition ccons (s : string) phi C := @cons form phi C.
 
-(* Extended formula list with names *)
-Inductive context := 
-  | cnil 
-  | ccons : string -> form -> context -> context
-  | cblackbox : list form -> context.  (* For unknown lists, we don't want to look into *)
+(* Special alias for unknown lists. Only used to indent with one space in Notation *)
+Definition cblackbox (A : list form) := A.  
 
 
 (** Context utilities *)
@@ -50,25 +51,26 @@ Definition nat_to_string n := match n with 0 => "0" | _ => nat_to_string' 100 n 
 
 (* Returns the index of the first occurence of `name` in the 
  * context `C`, or `None` if it doesn't exist. *)
-Fixpoint lookup' n C name :=
+Ltac lookup' n C name :=
   match C with
-  | ccons s _ C' => if string_dec s name then Some n else lookup' (S n) C' name
+  | ccons name _ _ => constr:(Some n) 
+  | ccons _ _ ?C' =>  lookup' (S n) C' name
   | _ => None
   end.
-Definition lookup := lookup' 0.
+Ltac lookup := lookup' 0.
 
 (* Finds the first name of form `H`, `H0`, `H1`, ... thats not 
  * contained in the context `C`. *)
-Fixpoint new_name' n C fuel := match fuel with
-  | 0 => "OUT OF FUEL"
-  | S fuel' =>
-    let name := match n with 0 => "H" | S n' => "H" ++ nat_to_string n' end in
-    match lookup C name with
-    | None => name
-    | Some _ => new_name' (S n) C fuel'
-    end
-end.
-Definition new_name C := new_name' 0 C 100.
+Ltac new_name' n C :=
+  let name := match n with 
+    | 0 => constr:("H") 
+    | S ?n' => let s := eval cbn in (nat_to_string n') in eval cbn in ("H" ++ s)
+  end in
+  match lookup C name with
+  | @None => name
+  | @Some _ _ => new_name' (S n) C
+  end.
+Ltac new_name C := new_name' 0 C.
 
 (* For context creation we need to give names to the initial formulas.
  * This is done using syntactic matching with ltac instead of a Galina
@@ -84,20 +86,13 @@ Ltac create_context' A :=
       end
     end
   | nil => constr:((cnil, 0))
-  | _ => 
+  | ?A' => 
     (* If it's not a cons or nil, it's a variable/function call/... 
      * and we don't want to look into it *)
-    constr:((cblackbox A, 0))
+    constr:((cblackbox A', 0))
   end.
 Ltac create_context A := let x := create_context' A in match x with (?c, _) => c end.
 
-
-
-(* `pm` embedds a `prv` derivation together with a context *)
-Inductive pm {p cf cp} (C: context) A phi := PM : @prv p cf cp A phi -> pm C A phi.
-
-Definition pm2prv {p cf cp} C A phi : pm C A phi -> @prv p cf cp A phi := fun p => match p with PM _ _ _ x => x end.
-Definition prv2pm {p cf cp} C A phi : @prv p cf cp A phi -> pm C A phi := fun x => PM C A phi x.
 
 Notation "" := cnil (only printing).
 Notation "A" := (cblackbox A) (at level 1, only printing, format " A").
@@ -105,7 +100,6 @@ Notation "C name : phi" := (ccons name phi C)
   (at level 1, C at level 200, phi at level 200,
   left associativity, format "C '//'  name  :  '[' phi ']'", only printing).
 
-Arguments pm {_} {_} {_} _ {_} _.
 Notation " C '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' phi" :=
   (pm C phi)
   (at level 1, left associativity,
@@ -113,8 +107,8 @@ Notation " C '━━━━━━━━━━━━━━━━━━━━━━
 
 
 (* Tactics to toggle proof mode *)
-Ltac fstart := match goal with [ |- ?A ⊢ _ ] => let C := create_context A in apply (pm2prv C) end.
-Ltac fstop := apply prv2pm.
+Ltac fstart := match goal with [ |- ?A ⊢ ?phi ] => let C := create_context A in change (pm C phi) end.
+Ltac fstop := match goal with [ |- pm ?C ?phi ] => change (prv C phi); unfold cnil; unfold ccons end.
 
 
 (* All the tactics defined below work with the original `prv` type.
@@ -125,8 +119,14 @@ Ltac fstop := apply prv2pm.
  * otherwise. *)
 Ltac make_compatible tac :=
   match goal with
-  | [ |- pm ?C _ ] => apply prv2pm; tac C; apply (pm2prv C)
-  | _ => tac cnil
+  | [ |- prv _ _ ] => tac cnil
+  | [ |- pm ?C _ ] => 
+    fstop; 
+    tac C;
+    match goal with 
+    | [ |- pm _ ?G ] => change (pm C G) 
+    | [ |- prv _ ?G ] => change (pm C G) 
+    end
   end.
 
 
@@ -155,17 +155,16 @@ Ltac fintro' id :=
   (* Special care for intro in proof mode *)
   | [ |- pm ?C (∀ ?t) ] => make_compatible ltac:(apply AllI)
   | [ |- pm ?C (?s --> ?t) ] =>
-      apply prv2pm; 
       apply II;
       let name := 
         match id with 
-        | "?" => eval cbn in (new_name C)
-        | _ => match eval cbn in (lookup C id) with
-          | None => id
-          | Some _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 2 msg
+        | "?" => new_name C
+        | _ => match lookup C id with
+          | @None => id
+          | @Some _ _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 2 msg
           end
         end
-      in apply (pm2prv (ccons name s C))
+      in change (pm (ccons name s C) t)
   end.
 Tactic Notation "fintro" := fintro' constr:("?").
 Tactic Notation "fintro" constr(H) := fintro' H.
@@ -284,16 +283,16 @@ Ltac nth A n :=
 
 (* Check wether T is a hypothesis, a context index, a context formula
  * or a context name and put it into hypothesis H. *)
-Ltac turn_into_hypothesis T H context := 
+Ltac turn_into_hypothesis T H contxt := 
   tryif is_hyp T
   then assert (H := T)  (* Hypothesis *)
   else match goal with [ |- ?C ⊢ _ ] => 
     match type of T with
     | form => assert (C ⊢ T) as H by ctx  (* Explicit form *)
     | nat => let T' := nth C T in assert (C ⊢ T') as H by ctx  (* Idx in context *)
-    | string => match eval cbn in (lookup context T) with  (* Context name *)
-      | None => let msg := eval cbn in ("Unknown identifier: " ++ T) in fail 4 msg
-      | Some ?n => let T' := nth C n in assert (C ⊢ T') as H by ctx
+    | string => match lookup contxt T with  (* Context name *)
+      | @None => let msg := eval cbn in ("Unknown identifier: " ++ T) in fail 4 msg
+      | @Some _ ?n => let T' := nth C n in assert (C ⊢ T') as H by ctx
       end
     end
   end.
@@ -410,7 +409,7 @@ Section FullLogic.
     FA ⊢ (num x ⊕ num y == num (x + y)).
   Proof.
     induction x; cbn.
-    - fapply ax_add_zero.  (* Arguments are infered! *)
+    - fapply ax_add_zero. (* Arguments are infered! *)
     - feapply ax_trans.
       + feapply ax_eq_succ. exact IHx.
       + fapply ax_add_rec.
