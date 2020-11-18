@@ -119,15 +119,64 @@ Ltac fstop := match goal with [ |- pm ?C ?phi ] => change (prv C phi); unfold cn
  * otherwise. *)
 Ltac make_compatible tac :=
   match goal with
-  | [ |- prv _ _ ] => tac cnil
+  | [ |- prv ?A _ ] => tac A
   | [ |- pm ?C _ ] => 
     fstop; 
     tac C;
     match goal with 
     | [ |- pm _ ?G ] => change (pm C G) 
-    | [ |- prv _ ?G ] => change (pm C G) 
+    | [ |- prv _ ?G ] => change (pm C G)
+    | _ => idtac 
     end
   end.
+
+
+
+
+(* Intro pattern parsing 
+ * This gets its own section to avoid importing Ascii globally. *)
+Section IntroPattern.
+  Import Ascii.
+
+  Inductive intro_pattern :=
+    | patId : string -> intro_pattern
+    | patAnd : intro_pattern -> intro_pattern -> intro_pattern
+    | patOr : intro_pattern -> intro_pattern -> intro_pattern.
+
+  Fixpoint read_name s := match s with
+  | String "]" s' => ("", String "]" s')
+  | String " " s' => ("", String " " s')
+  | String "|" s' => ("", String "|" s')
+  | String c s' => let (a, s'') := read_name s' in (String c a, s'')
+  | EmptyString => ("", EmptyString)
+  end.
+
+  Fixpoint parse_intro_pattern' s fuel := match fuel with
+  | 0 => (None, s)
+  | S fuel' =>
+    match s with
+    | String ("[") s' => 
+        match parse_intro_pattern' s' fuel' with
+        | (Some p1, String "|" s'') => match parse_intro_pattern' s'' fuel' with
+                                      | (Some p2, String "]" s''') => (Some (patOr p1 p2), s''')
+                                      | _ => (None, "")
+                                      end
+        | (Some p1, String " " s'') => match parse_intro_pattern' s'' fuel' with
+                                      | (Some p2, String "]" s''') => (Some (patAnd p1 p2), s''')
+                                      | _ => (None, "")
+                                      end
+        | _ => (None, "")
+        end
+      | String ("]") s' => (Some (patId "?"), String "]" s')
+      | String " " s' => (Some (patId "?"), String " " s')
+      | String "|" s' => (Some (patId "?"), String "|" s')
+      | EmptyString => (None, EmptyString)
+      | s => let (a, s') := read_name s in (Some (patId a), s')
+    end
+  end.
+  Definition parse_intro_pattern s := fst (parse_intro_pattern' s 100).
+
+End IntroPattern.
 
 
 
@@ -141,30 +190,70 @@ Ltac fleft := make_compatible ltac:(fun _ => apply DI1).
 Ltac fright := make_compatible ltac:(fun _ => apply DI2).
 
 
+
+
+
 (* 
  * [fintro], [fintros] 
  * 
  * Similar to Coq. Identifiers need to be given as strings (e.g. 
  * [fintros "H1" "H2"]). With "?" you can automatically generate
- * a name (e.g. [fintros "?" "H"])  
+ * a name (e.g. [fintros "?" "H"]).
+ * 
+ * Now also handles intro patterns! For now unneccessary spaces
+ * are not alowed in intro patterns. E.g. instead of "[H1 | H2]",
+ * write "[H1|H2]".
  *)
-Ltac fintro' id :=
-  match goal with 
-  | [ |- ?A ⊢ ∀ ?t ] => apply AllI
-  | [ |- ?A ⊢ (?s --> ?t) ] => apply II
-  (* Special care for intro in proof mode *)
-  | [ |- pm ?C (∀ ?t) ] => make_compatible ltac:(apply AllI)
-  | [ |- pm ?C (?s --> ?t) ] =>
-      apply II;
-      let name := 
-        match id with 
-        | "?" => new_name C
-        | _ => match lookup C id with
-          | @None => id
-          | @Some _ _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 2 msg
+
+Section FullLogic.
+  Variable p : peirce.
+
+  Lemma intro_and_destruct A s t G :
+    A ⊢ (s --> t --> G) -> A ⊢ (s ∧ t --> G).
+  Proof.
+    intros. now apply switch_conj_imp.
+  Qed.
+
+  Lemma intro_or_destruct A s t G :
+    A ⊢ (s --> G) -> A ⊢ (t --> G) -> A ⊢ (s ∨ t --> G).
+  Proof.
+    intros Hs Ht. apply II. eapply DE. ctx. 
+    eapply Weak in Hs. eapply IE. apply Hs. ctx. firstorder.
+    eapply Weak in Ht. eapply IE. apply Ht. ctx. firstorder.
+  Qed.
+End FullLogic.
+
+Ltac fintro'' intro_pat :=
+match intro_pat with
+| patAnd ?p1 ?p2 => 
+    make_compatible ltac:(fun _ => apply intro_and_destruct);
+    fintro'' p1; fintro'' p2
+| patOr ?p1 ?p2 =>
+    make_compatible ltac:(fun _ => apply intro_or_destruct);
+    [fintro'' p1 | fintro'' p2]
+| patId ?id =>
+    match goal with 
+    | [ |- ?A ⊢ ∀ ?t ] => apply AllI
+    | [ |- ?A ⊢ (?s --> ?t) ] => apply II
+    (* Special care for intro in proof mode *)
+    | [ |- pm ?C (∀ ?t) ] => make_compatible ltac:(fun _ => apply AllI)
+    | [ |- pm ?C (?s --> ?t) ] =>
+        apply II;
+        let name := 
+          match id with 
+          | "?" => new_name C
+          | _ => match lookup C id with
+            | @None => id
+            | @Some _ _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 2 msg
+            end
           end
-        end
-      in change (pm (ccons name s C) t)
+        in change (pm (ccons name s C) t)
+    end
+end.
+Ltac fintro' intro_pat := 
+  match eval cbn in (parse_intro_pattern intro_pat) with
+  | Some ?p => fintro'' p
+  | None => let msg := eval cbn in ("Invalid intro pattern: " ++ intro_pat) in fail 2 msg
   end.
 Tactic Notation "fintro" := fintro' constr:("?").
 Tactic Notation "fintro" constr(H) := fintro' H.
@@ -277,8 +366,8 @@ Ltac instantiate_evars H := repeat eapply AllE in H.
 Tactic Notation "is_hyp" hyp(H) := idtac.
 Ltac nth A n :=
   match n with
-  | 0 => match A with ?t :: _ => t end
-  | S ?n' => match A with _ :: ?A' => nth A' n' end
+  | 0 => match A with ?t :: _ => t | ccons _ ?t _ => t end
+  | S ?n' => match A with _ :: ?A' => nth A' n' | ccons _ _ ?A' => nth A' n' end
   end.
 
 (* Check wether T is a hypothesis, a context index, a context formula
@@ -297,35 +386,66 @@ Ltac turn_into_hypothesis T H contxt :=
     end
   end.
 
+(* If `H` has the type `P1 -> P2 -> ... -> Pn -> (A ⊢ ϕ)`, this
+ * tactic adds goals for `P1, P2, ..., Pn` and specializes `H`. *)
+Ltac assert_premises H :=
+  match type of H with
+  | _ ⊢ _ => idtac
+  | pm _ _ => idtac
+  | ?A -> ?B => 
+      let H' := fresh "H" in assert A as H';
+      [|specialize (H H'); clear H'; assert_premises H ]
+  end.
+
 Ltac feapply' T A := fun contxt =>
   let H := fresh "H" in
   turn_into_hypothesis T H contxt;
-  fspecialize_list H A;
-  instantiate_evars H;
-  simpl_subst H;
-  match goal with [ |- ?C ⊢ _ ] => 
-    eapply (Weak _ C) in H; [| firstorder]
+  (* If `H` containes has further Coq premises befor the formula 
+   * statement, we add them as additional goals. *)
+  assert_premises H;
+  (* Match on the goal, so that we don't try to apply to these
+   * additional goals. *)
+  match goal with
+  | [ |- _ ⊢ _ ] =>
+    fspecialize_list H A;
+    instantiate_evars H;
+    simpl_subst H;
+    match goal with [ |- ?C ⊢ _ ] => 
+      eapply (Weak _ C) in H; [| firstorder]
+    end;
+    fapply_without_quant H
+  | [ |- _ ] => idtac
   end;
-  fapply_without_quant H;
   clear H.
 
 Ltac fapply' T A contxt :=
   let H := fresh "H" in
   turn_into_hypothesis T H contxt;
-  fspecialize_list H A; 
-  instantiate_evars H; 
-  simpl_subst H;
-  match goal with [ |- ?U ⊢ _ ] => 
-    eapply (Weak _ U) in H; [| firstorder]
+  (* If `H` containes has further Coq premises befor the formula 
+   * statement, we add them as additional goals. *)
+   assert_premises H;
+   (* Match on the goal, so that we don't try to apply to these
+    * additional goals. *)
+   match goal with
+   | [ |- _ ⊢ _ ] =>
+    assert_premises H;
+    fspecialize_list H A; 
+    instantiate_evars H; 
+    simpl_subst H;
+    match goal with [ |- ?U ⊢ _ ] => 
+      eapply (Weak _ U) in H; [| firstorder]
+    end;
+    fapply_without_quant H;
+    (* Evars should only be used for unification in [fapply].
+    * Therefore reject, if there are still evars visible. *)
+    (* TODO: This is not optimal. If the goal contains evars, 
+    * H might still contain evars after unification and we would fail. *)
+    tryif has_evar ltac:(type of H) 
+    then fail 3 "Cannot find instance for variable. Try feapply?" 
+    else clear H
+  | [ |- _ ] => idtac
   end;
-  fapply_without_quant H;
-  (* Evars should only be used for unification in [fapply].
-   * Therefore reject, if there are still evars visible. *)
-  (* TODO: This is not optimal. If the goal contains evars, 
-   * H might still contain evars after unification and we would fail. *)
-  tryif has_evar ltac:(type of H) 
-  then fail 2 "Cannot find instance for variable. Try feapply?" 
-  else clear H.
+  try clear H.
 
 
 Tactic Notation "feapply" constr(T) := make_compatible ltac:(feapply' T constr:([] : list form)).
@@ -341,6 +461,135 @@ Tactic Notation "fapply" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := m
 
 
 
+(*
+ * [fassert phi], [fassert phi as "H"]
+ *
+ * Similar to coq. Also supports intro patterns.
+ *)
+
+Section FullLogic.
+  Variable p : peirce.
+
+  Lemma fassert_help A phi psi :
+    A ⊢ phi -> A ⊢ (phi --> psi) -> A ⊢ psi.
+  Proof.
+    intros H1 H2. eapply IE. exact H2. exact H1.
+  Qed.
+End FullLogic.
+Arguments fassert_help {_} _ _ _.
+
+Ltac fassert' phi := fun _ =>
+match goal with
+| [ |- ?A ⊢ ?psi ] =>
+  let H1 := fresh "H" in
+  let H2 := fresh "H" in
+  assert (A ⊢ phi) as H1; [ | 
+    assert (A ⊢ (phi --> psi)); [ clear H1 |
+      apply (fassert_help A phi psi H1 H2)
+    ]
+  ]
+end.
+
+Tactic Notation "fassert" constr(phi) := (make_compatible ltac:(fassert' phi)); [| fintro].
+Tactic Notation "fassert" constr(phi) "as" constr(H) := (make_compatible ltac:(fassert' phi)); [| fintro H].
+Tactic Notation "fassert" constr(phi) "by" tactic(tac) := (make_compatible ltac:(fassert' phi)); [tac | fintro].
+Tactic Notation "fassert" constr(phi) "as" constr(H) "by" tactic(tac) := (make_compatible ltac:(fassert' phi)); [tac | fintro H].
+
+
+
+
+
+(*
+ * [fdestruct H], [fdestruct H as "pattern"]
+ *
+ * Destructs an assumption into the ND context. Works on
+ * - Coq hypothesis by name
+ * - Formula in in ND context by index (e.g. [fdestruct 3])
+ * - Name of a context assumption in proof mode (e.g. [fdestruct "H2"])
+ *)
+
+Ltac fdestruct' n pat :=
+  match n with
+  | 0 => 
+      match goal with 
+      | [ |- prv _ _ ] => apply -> switch_imp; fintro'' pat
+      | [ |- pm (ccons _ ?t ?C) ?phi ] =>
+          apply -> switch_imp; change (pm C (t --> phi)); fintro'' pat
+      end
+  | S ?n' =>
+      match goal with 
+      | [ |- prv _ _ ] => apply -> switch_imp; fdestruct' n' pat; apply <- switch_imp
+      | [ |- pm (ccons ?a ?t ?C) ?phi ] => 
+          apply -> switch_imp; change (pm C (t --> phi)); fdestruct' n' pat;
+          match goal with [ |- ?G ] => idtac G end;
+          match goal with [ |- pm ?C' (t --> phi) ] => 
+            apply <- switch_imp; change (pm (ccons a t C') phi)
+          end
+      end
+  end.
+
+Ltac create_pattern T :=
+  match T with
+  | ?t ∧ ?s =>
+    let p1 := create_pattern t in
+    let p2 := create_pattern s in
+    constr:(patAnd p1 p2)
+  | ?t ∨ ?s =>
+    let p1 := create_pattern t in
+    let p2 := create_pattern s in
+    constr:(patOr p1 p2)
+  | _ => constr:(patId "?")
+  end.
+
+Ltac fdestruct'' T pat :=
+  tryif is_hyp T then (
+    let H := fresh "H" in
+    let X := fresh "X" in
+    assert (H := T);
+    match goal with
+    | [ |- prv ?A ?t ] => 
+        match type of H with 
+        | prv _ ?s => enough (?A ⊢ (s --> t)) as X by (feapply X; feapply H)
+        | pm _ ?s => enough (?A ⊢ (s --> t)) as X by (feapply X; feapply H)
+        end
+    | [ |- pm ?A ?t ] => 
+        match type of H with 
+        | prv _ ?s => enough (pm A (s --> t)) as X by (feapply X; feapply H)
+        | pm _ ?s => enough (pm ?A (s --> t)) as X by (feapply X; feapply H)
+        end
+    end;
+    fintro "?"; fdestruct'' 0 pat; clear H
+  )
+  else (
+    let n := match type of T with 
+      | nat => T 
+      | string => match goal with [ |- pm ?C _ ] => 
+        match lookup C T with 
+        | @Some _ ?n' => n'
+        | @None => let msg := eval cbn in ("Unknown identifier: " ++ T) in fail 3 msg
+        end
+      end
+    end in
+    let pattern := lazymatch pat with
+      | "" => 
+        match goal with 
+        | [ |- prv ?A _ ] => let t := nth A n in create_pattern t 
+        | [ |- pm ?C _ ] => let t := nth C n in create_pattern t 
+        end
+      | _ => 
+        match eval cbn in (parse_intro_pattern pat) with 
+        | @Some _ ?p => p
+        | @None => let msg := eval cbn in ("Invalid pattern: " ++ pat) in fail 3 msg
+        end
+    end in fdestruct' n pattern
+  ).
+
+Tactic Notation "fdestruct" constr(T) := fdestruct'' T "".
+Tactic Notation "fdestruct" constr(T) "as" constr(pat) := fdestruct'' T pat.
+
+
+
+
 
 
 Section FullLogic.
@@ -350,42 +599,6 @@ Section FullLogic.
 
   (* Basic tactics *)
   Ltac freflexivity := fapply ax_refl.
-
-
-  (*
-   * [fdestruct n]
-   *
-   *  Destructs the n'th assumption in the ND context back into
-   * the ND context.
-   *)
-
-  Lemma fdestruct_and A s t G :
-    (s::t::A) ⊢ G -> (s ∧ t::A) ⊢ G.
-  Proof.
-    intros. apply switch_imp. apply switch_conj_imp. 
-    repeat apply <- switch_imp. fapply H.
-  Qed.
-
-  Lemma fdestruct_or A s t G :
-    (s::A) ⊢ G -> (t::A) ⊢ G -> (s ∨ t::A) ⊢ G.
-  Proof.
-    intros Hs Ht. eapply DE. ctx. fapply Hs. fapply Ht.
-  Qed.
-
-  Ltac fdestruct n := make_compatible ltac:( fun _ =>
-    match n with
-    | 0 => 
-      match goal with 
-      | [ |- (?s ∧ ?t :: ?A) ⊢ ?G ] => apply fdestruct_and 
-      | [ |- (?s ∨ ?t :: ?A) ⊢ ?G ] => apply fdestruct_or
-      end
-    | S ?n' => idtac "TODO"
-    end).
-
-
-
-
-
 
 
 
@@ -530,7 +743,7 @@ Section FullLogic.
       match goal with [ |- ?U ⊢ ?G ] =>
         let G' := remove_shifts G t in change (U ⊢ G'[t..])
       end;
-
+      
       (* 3. Change [t..] to [t'...] using leibniz. For some reason
        *  we cannot directly [apply leibniz with (t := t')] if t'
        *  contains ⊕, σ, etc. But evar seems to work. *)
@@ -538,11 +751,11 @@ Section FullLogic.
       eapply (leibniz _ _ ?[t'']);
       [ instantiate (t'' := t'); firstorder |
         match back with
-        | false => feapply ax_sym; apply H
+        | false => feapply ax_sym; fapply H
         | true => apply H
         end
       | ];
-
+      
       (* 4. Pull substitutions inward *)
       cbn;
 
@@ -610,6 +823,75 @@ Section FullLogic.
   Qed.
 
 
+
+
+  Lemma eq_num t :
+    bound_term 0 t = true -> exists n, FA ⊢ (t == num n).
+  Proof.
+    intros H0. induction t.
+    - now exfalso.
+    - destruct F; repeat depelim v; cbn in H0.
+      + exists 0. fapply ax_refl.
+      + destruct (IH h) as [n H]. left. now destruct (bound_term 0 h).
+        exists (S n). cbn. now fapply ax_eq_succ.
+      + destruct (IH h) as [n1 H1]. left. now destruct (bound_term 0 h).
+        destruct (IH h0) as [n2 H2]. right. left. now do 2 destruct bound_term.
+        exists (n1 + n2). assert (H := num_add_homomorphism n1 n2). frewrite <- H.
+        now fapply ax_eq_add.
+      + destruct (IH h) as [n1 H1]. left. now destruct (bound_term 0 h).
+        destruct (IH h0) as [n2 H2]. right. left. now do 2 destruct bound_term.
+        exists (n1 * n2). assert (H := num_mult_homomorphism n1 n2). frewrite <- H.
+        now fapply ax_eq_mult.
+  Qed.
+
+  Fixpoint quantor_free (phi : form) := match phi with
+  | fal => True
+  | atom _ _ => True
+  | bin _ phi1 phi2 => quantor_free phi1 /\ quantor_free phi2
+  | quant _ _ => False
+  end.
+
+  Lemma xm_quantor_free phi :
+    closed phi = true -> quantor_free phi -> (ax_zero_succ::ax_succ_inj::FA) ⊢ (phi ∨ (phi --> ⊥)).
+  Proof.
+    intros H0 H1. induction phi; fstart.
+    - fright. fintros "F". fapply "F".
+    - destruct P. repeat depelim v. cbn in H0, H1. clear H1. 
+      destruct (eq_num h) as [n1 H1]. now destruct bound_term.
+      destruct (eq_num h0) as [n2 H2]. now do 2 destruct bound_term.
+      frewrite H1. frewrite H2. clear H1 H2. 
+      fstop; revert n2; induction n1 as [|n1 IH]; intros; fstart; cbn.
+      + destruct n2; cbn.
+        * fleft. fapply ax_refl.
+        * fright. fapply ax_zero_succ.
+      + destruct n2; cbn.
+        * fright. fintros. feapply ax_zero_succ. feapply ax_sym. ctx.
+        * specialize (IH n2). fdestruct IH as "[IH|IH]".
+          -- fleft. frewrite "IH". fapply ax_refl.
+          -- fright. fintro. fapply "IH". fapply ax_succ_inj. ctx.
+    - cbn in H0, H1. destruct (bound 0 phi1) eqn:H2. 2: now exfalso.
+      fassert (phi1 ∨ (phi1 --> ⊥)) as "IH1" by now fapply IHphi1.
+      fassert (phi2 ∨ (phi2 --> ⊥)) as "IH2" by now fapply IHphi2.
+      destruct b.
+      + fdestruct "IH1" as "[IH1|IH1]". fdestruct "IH2" as "[IH2|IH2]".
+        * fleft. fsplit; ctx.
+        * fright. fintros "[ ]". fapply "IH2". ctx.
+        * fright. fintros "[ ]". fapply "IH1". ctx.
+      + fdestruct "IH1" as "[IH1|IH1]". 2: fdestruct "IH2" as "[IH2|IH2]".
+        * fleft. fleft. ctx.
+        * fleft. fright. ctx.
+        * fright. fintros "[|]". fapply "IH1"; ctx. fapply "IH2"; ctx.
+      + fdestruct "IH1" as "[IH1|IH1]". fdestruct "IH2" as "[IH2|IH2]".
+        * fleft. fintro. ctx.
+        * fright. fintro "H1". fapply "IH2". fapply "H1". ctx.
+        * fleft. fintro. fexfalso. fapply "IH1". ctx.
+    - now exfalso.
+  Qed.
+      
+  
+  
+
+
   (* Rewrite under ∀ test: *)
 
   Lemma subst_term_up_shift (s : term) t :
@@ -631,4 +913,6 @@ Section FullLogic.
     change (FA ⊢ ∀ $0 ⊕ σ t'[↑] == t'[up ↑][up t'..] ⊕ σ $0).
     enough (FA ⊢ ∀ $0 ⊕ σ t'[↑] == t' ⊕ σ $0) by now rewrite subst_term_up_shift.
   Abort.
-    
+
+
+
