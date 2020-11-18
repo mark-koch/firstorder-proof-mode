@@ -916,3 +916,55 @@ Section FullLogic.
 
 
 
+  (* Names test *)
+  Definition named_quant {fsig psig ops} op (x : string) phi := @quant fsig psig ops op phi.
+  Definition named_var {fsig} n (x : string) := @var fsig n.
+  Arguments named_var {_ _} _.
+
+  Notation "∀ x , phi" := (named_quant All x phi) (at level 50, only printing).
+  Notation "∃ x , phi" := (named_quant Ex x phi) (at level 50, only printing).
+  Notation "§ x" := (named_var x) (at level 30, only printing, format "§ '/' x").
+
+  Ltac annotate_vector annotate_term v f :=
+    match v with
+    | @Vector.nil ?a => constr:(@Vector.nil a)
+    | Vector.cons ?x ?v' => 
+        let x' := annotate_term x f in 
+        let v'' := annotate_vector annotate_term v' f in 
+        constr:(Vector.cons x' v'')
+    end.
+
+  Ltac annotate_term t f :=
+    match t with
+    | var ?n =>
+        let name := eval cbn in (f n) in
+        constr:(@named_var _ n name)
+    | func ?sig ?v => 
+        let v' := annotate_vector annotate_term v f in
+        constr:(func sig v')
+    end.
+
+  Ltac annotate_form' phi f idx := 
+    match phi with
+    | fal => fal
+    | atom ?P ?v =>
+        let v' := annotate_vector annotate_term v f in
+        constr:(atom P v')
+    | bin ?psi1 ?psi2 =>
+        let psi1' := annotate_form' psi1 f idx in
+        let psi2' := annotate_form' psi2 f idx in
+        constr:(bin psi1' psi2')
+    | quant ?op ?psi =>
+        let name := eval cbn in ("x" ++ nat_to_string idx) in
+        let f' := constr:(fun n => match n with 0 => name | S n' => f n' end) in
+        let psi' := annotate_form' psi f' (S idx) in
+        constr:(named_quant op name psi')
+    end.
+  Ltac annotate_names phi := annotate_form' phi (fun (n : nat) => "?") 0.
+
+  Ltac test :=
+    match goal with
+    | [ |- ?A ⊢ ?G] => let G' := annotate_names G in change (A ⊢ G')
+    end.
+
+
