@@ -44,10 +44,10 @@ Instance PA_preds_signature : preds_signature :=
 Arguments Vector.cons {_} _ {_} _, _ _ _ _.
 
 Definition zero := func Zero (Vector.nil term).
-Notation "'σ' x" := (func Succ (Vector.cons x (Vector.nil term))) (at level 37).
-Notation "x '⊕' y" := (func Plus (Vector.cons x (Vector.cons y (Vector.nil term))) ) (at level 39).
-Notation "x '⊗' y" := (func Mult (Vector.cons x (Vector.cons y (Vector.nil term))) ) (at level 38).
-Notation "x '==' y" := (atom Eq (Vector.cons term x 1 (Vector.cons term y 0 (Vector.nil term))) ) (at level 40).
+Notation "'σ' x" := (@func PA_funcs_signature Succ (Vector.cons x (Vector.nil term))) (at level 37).
+Notation "x '⊕' y" := (@func PA_funcs_signature Plus (Vector.cons x (Vector.cons y (Vector.nil term))) ) (at level 39).
+Notation "x '⊗' y" := (@func PA_funcs_signature Mult (Vector.cons x (Vector.cons y (Vector.nil term))) ) (at level 38).
+Notation "x '==' y" := (@atom PA_funcs_signature PA_preds_signature _ Eq (Vector.cons term x 1 (Vector.cons term y 0 (Vector.nil term))) ) (at level 40).
 
 
 
