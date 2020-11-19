@@ -108,7 +108,7 @@ Notation " C '━━━━━━━━━━━━━━━━━━━━━━
 
 (* Tactics to toggle proof mode *)
 Ltac fstart := match goal with [ |- ?A ⊢ ?phi ] => let C := create_context A in change (pm C phi) end.
-Ltac fstop := match goal with [ |- pm ?C ?phi ] => change (prv C phi); unfold cnil; unfold ccons end.
+Ltac fstop := match goal with [ |- pm ?C ?phi ] => change (prv C phi); unfold cnil; unfold ccons; unfold cblackbox end.
 
 
 (* All the tactics defined below work with the original `prv` type.
@@ -289,15 +289,10 @@ Tactic Notation "ctx2hyp" integer(n) "as" reference(H) := make_compatible ltac:(
 
 
 
-(* 
- * [fspecialize (H x1 x2 ... xn)], [fspecialize H with x1 x2 ... xn] 
- * 
- * Specializes a Coq hypothesis `H` of the form `X ⊢ ∀∀...∀ p1 --> ... --> pn --> g`
- * with `x1, x2, ..., xn`.
- *)
 
-(* Spimplify terms that occur during specialization  *)
-Ltac simpl_subst H :=
+
+(* Spimplify terms that occur during specialization *)
+Ltac simpl_subst_hyp H :=
   cbn in H;
   repeat match type of H with
   | context C[subst_term ?s ?t] => let H' := context C[t[s]] in change H' in H
@@ -306,7 +301,40 @@ Ltac simpl_subst H :=
   | context C[?t[S >> var]] => let H' := context C[t[↑]] in change H' in H
   end;
   try rewrite !up_term in H;
-  try rewrite !subst_term_shift in H.
+  try rewrite !subst_term_shift in H;
+  try repeat match type of H with context C[func Zero (Vector.nil term)] =>
+    let H' := context C[zero] in change H' in  H
+  end.
+
+Ltac simpl_subst_goal :=
+  cbn;
+  repeat match goal with
+  | [ |- context C[subst_term ?s ?t] ] => let G := context C[t[s]] in change G
+  end;
+  repeat match goal with
+  | [ |- context C[?t[S >> var]] ] => let G := context C[t[↑]] in change G
+  end;
+  try rewrite !up_term;
+  try rewrite !subst_term_shift;
+  try repeat match goal with [ |- context C[func Zero (Vector.nil term)] ] =>
+    let G' := context C[zero] in change G'
+  end.
+
+Tactic Notation "simpl_subst" hyp(H) := (simpl_subst_hyp H).
+Tactic Notation "simpl_subst" := (simpl_subst_goal).
+
+
+
+
+
+
+
+(* 
+ * [fspecialize (H x1 x2 ... xn)], [fspecialize H with x1 x2 ... xn] 
+ * 
+ * Specializes a Coq hypothesis `H` of the form `X ⊢ ∀∀...∀ p1 --> ... --> pn --> g`
+ * with `x1, x2, ..., xn`.
+ *)
 
 Ltac fspecialize_list H A := 
   match A with
@@ -690,32 +718,46 @@ Section FullLogic.
 
 
 
+  Fixpoint up_n n sigma := match n with
+  | 0 => sigma
+  | S n' => up (up_n n' sigma)
+  end.
 
+  Ltac shift_n n t := 
+    match n with
+    | 0 => t
+    | S ?n' => shift_n n' (t[↑])
+    end.
 
   (* Returns a new formula where all occurences of `t` are turned into
-   * `($0)[t..]` and every other term `s` into `s[↑][t..]`. *)
-  Ltac add_shifts G t := (* TODO: Quantors :( *)
-    let f := add_shifts in 
+   * `($n)[up_n n t..]` and every other term `s` into `s[up_n n ↑][up_n t..]`,
+   * where `n` is the quantor depth. *)
+  Ltac add_shifts' n G t :=
+    let f := add_shifts' n in 
+    let t_shifted := shift_n n t in
     match G with
-    | t => constr:(($0)[t..])
-    | $(?n) => constr:(($n)[↑][t..])
+    | t_shifted => constr:(($n)[up_n n t..])
+    | $(?m) => constr:(($m)[up_n n ↑][up_n n t..])
     | ?u --> ?v => let u' := f u t in let v' := f v t in constr:(u' --> v')
     | ?u ∧ ?v => let u' := f u t in let v' := f v t in constr:(u' ∧ v')
     | ?u ∨ ?v => let u' := f u t in let v' := f v t in constr:(u' ∨ v')
     | ?u ⊕ ?v => let u' := f u t in let v' := f v t in constr:(u' ⊕ v')
     | ?u ⊗ ?v => let u' := f u t in let v' := f v t in constr:(u' ⊗ v')
     | ?u == ?v => let u' := f u t in let v' := f v t in constr:(u' == v')
-    | σ ?u => let u' := f u t in  constr:(σ u')
-    | ?u => constr:(u[↑][t..]) 
+    | σ ?u => let u' := f u t in constr:(σ u')
+    | ∀ ?u => let u' := add_shifts' (S n) u t in constr:(∀ u')
+    | ∃ ?u => let u' := add_shifts' (S n) u t in constr:(∃ u')
+    | ?u => constr:(u[up_n n ↑][up_n n t..])
             (* TODO: Why doesn't this work: *) (* tryif is_var u then constr:(u[↑][t..]) else fail *)
     end.
+  Ltac add_shifts := add_shifts' 0.
 
-  (* Returns a new formula where all occurences of `s[↑][t..]` in G are
-   * turned into `s[↑]` and `($0)[t]` into `$0`. *)
+  (* Returns a new formula where all occurences of `s[up_n n ↑][up_n nt..]` 
+   * in G are turned into `s[up_n n ↑]` and `($n)[up_n n t..]` into `$n`. *)
   Ltac remove_shifts G t :=
     match G with 
-    | context C[ ?s[↑][t..] ] => let G' := context C[ s[↑] ] in remove_shifts G' t
-    | context C[ ($0)[t..] ] => let G' := context C[ $0 ] in remove_shifts G' t
+    | context C[ ?s[up_n ?n ↑][up_n ?n t..] ] => let G' := context C[ s[up_n n ↑] ] in remove_shifts G' t
+    | context C[ ($ ?n)[up_n ?n t..] ] => let G' := context C[ $n ] in remove_shifts G' t
     | _ => G
     end.
 
@@ -729,14 +771,25 @@ Section FullLogic.
       let t := match back with true => _t' | false => _t end in
       let t' := match back with true => _t | false => _t' end in
 
-      (* 1. Replace each occurence of `t` with `($0)[t..]` and every other
-       *  "s" with "s[↑][t..]". The new formula is created with the [add_shifts]
-       *  tactic and proven with the shift lemmas. *)
+      (* 1. Replace each occurence of `t` with `($n)[up_n n t..]` and every
+       *  other `s` with `s[up_n n ↑][up_n n t..]`. The new formula is 
+       *  created with the [add_shifts] tactic and proven in place. *)
       match goal with [ |- ?C ⊢ ?G ] => 
         let X := fresh in 
         let G' := add_shifts G t in
         enough (C ⊢ G') as X;
-        [ try rewrite !subst_shift in X; try rewrite !subst_term_shift in X; apply X |]
+        [
+          repeat match type of X with context K[ ?u[up_n ?n ↑][up_n ?n t..] ] =>
+            let R := fresh in
+            (* TODO: Prove general lemma for this: *)
+            assert (u[up_n n ↑][up_n n t..] = u) as R; [
+              rewrite subst_term_comp; apply subst_term_id; 
+              let a := fresh in intros a;
+              (do 10 try destruct a); reflexivity |];
+            rewrite R in X
+          end;
+          apply X
+        |]
       end;
 
       (* 2. Pull out the [t..] substitution *)
@@ -744,7 +797,7 @@ Section FullLogic.
         let G' := remove_shifts G t in change (U ⊢ G'[t..])
       end;
       
-      (* 3. Change [t..] to [t'...] using leibniz. For some reason
+      (* 3. Change [t..] to [t'..] using leibniz. For some reason
        *  we cannot directly [apply leibniz with (t := t')] if t'
        *  contains ⊕, σ, etc. But evar seems to work. *)
       let t'' := fresh "t" in 
@@ -756,17 +809,44 @@ Section FullLogic.
         end
       | ];
       
-      (* 4. Pull substitutions inward *)
-      cbn;
+      (* 4. Pull substitutions inward, but don't unfold `up_n` *)
+      cbn -[up_n];
 
       (* 5. Turn subst_term calls back into []-Notation *)
-      repeat match goal with [ |- context C[subst_term t'.. ?s[↑]] ] =>
-        let G' := context C[ s[↑][t'..] ] in change G'
+      repeat match goal with [ |- context C[subst_term ?sigma ?s] ] =>
+        let G' := context C[ s[sigma] ] in change G'
+      end;
+
+      (* 6. Fix simplification that occurs because of cbn *)
+      repeat match goal with [ |- context C[up_n ?n ↑ ?a] ] =>
+        let G' := context C[ ($a)[up_n n ↑] ] in change G'
+      end;
+
+      (* 7. Change `up (up ...)` back into `up_n n ...` *)
+      repeat match goal with 
+      | [ |- context C[up_n ?n (up ?s)]] => let G' := context C[up_n (S n) s] in change G'
+      | [ |- context C[up ?s]] => let G' := context C[up_n 1 s] in idtac G'; change G'
       end;
 
       (* 6. Simplify *)
-      try rewrite !subst_shift;
-      try rewrite !subst_term_shift;
+      repeat match goal with [ |- context K[ ?u[up_n ?n ↑][up_n ?n t'..] ]] =>
+        let R := fresh in
+        (* TODO: Prove general lemma for this: *)
+        assert (u[up_n n ↑][up_n n t'..] = u) as R; [
+          rewrite subst_term_comp; apply subst_term_id; 
+          let a := fresh in intros a;
+          (do 10 try destruct a); reflexivity |];
+        rewrite ! R;
+        clear R
+      end;
+
+      (* Base case for rewrite without quantors *)
+      cbn; try rewrite !subst_shift; try rewrite !subst_term_shift;
+
+      (* Use notation *)
+      repeat match goal with [ |- context C[S >> var] ] =>
+        let G' := context C[↑] in change G'
+      end;
       repeat match goal with [ |- context C[func Zero (Vector.nil term)] ] =>
         let G' := context C[zero] in change G'
       end
@@ -782,9 +862,6 @@ Section FullLogic.
   Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) ")" := make_compatible ltac:(frewrite' T constr:([x1]) constr:(true)).
   Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) constr(x2) ")" := make_compatible ltac:(frewrite' T constr:([x1;x2]) constr:(true)).
   Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(frewrite' T constr:([x1;x2;x3]) constr:(true)).
-
-
-
 
 
 
@@ -824,6 +901,22 @@ Section FullLogic.
 
 
 
+  (* Rewrite under quantors: *)
+
+  Goal forall t t', FA ⊢ (t == t') -> FA ⊢ ∀ $0 ⊕ σ t[↑] == t' ⊕ σ $0.
+  Proof.
+    intros. frewrite H. 
+  Abort.
+
+  Goal forall t t', FA ⊢ (t == t') -> FA ⊢ ∀∃ $0 ⊕ σ t == t'[↑][↑] ⊕ σ $0.
+  Proof.
+    intros. frewrite <- H. 
+  Abort.
+
+
+
+
+  (* XM for closed, quantor free formulas: *)
 
   Lemma eq_num t :
     bound_term 0 t = true -> exists n, FA ⊢ (t == num n).
@@ -887,33 +980,9 @@ Section FullLogic.
         * fleft. fintro. fexfalso. fapply "IH1". ctx.
     - now exfalso.
   Qed.
-      
   
   
-
-
-  (* Rewrite under ∀ test: *)
-
-  Lemma subst_term_up_shift (s : term) t :
-    s[up ↑][up t..] = s.
-  Proof.
-    rewrite subst_term_comp. apply subst_term_id. intros. destruct n; cbn; reflexivity.
-  Qed.
-
-  Goal forall t t', FA ⊢ (t == t') -> FA ⊢ ∀ $0 ⊕ σ t[↑] == t' ⊕ σ $0.
-  Proof.
-    intros.
-    enough (FA ⊢ ∀ ($0)[up ↑][up t..] ⊕ σ ($0)[↑][up t..] == t'[up ↑][up t..] ⊕ σ ($0)[up ↑][up t..]) as X
-    by now rewrite !subst_term_up_shift in X; rewrite up_term in X.
-    change (FA ⊢ (∀ ($0)[up ↑] ⊕ σ ($0)[↑] == t'[up ↑] ⊕ σ ($0)[up ↑])[t..]).
-    
-    apply leibniz with (t := t'). firstorder. now fapply ax_sym.
-
-    cbn.
-    change (FA ⊢ ∀ $0 ⊕ σ t'[↑] == t'[up ↑][up t'..] ⊕ σ $0).
-    enough (FA ⊢ ∀ $0 ⊕ σ t'[↑] == t' ⊕ σ $0) by now rewrite subst_term_up_shift.
-  Abort.
-
+  
 
 
   (* Names test *)
