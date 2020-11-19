@@ -441,7 +441,10 @@ Ltac feapply' T A := fun contxt =>
     match goal with [ |- ?C ⊢ _ ] => 
       eapply (Weak _ C) in H; [| firstorder]
     end;
-    fapply_without_quant H
+    fapply_without_quant H; 
+    (* [fapply_without_quant] creates the subgoals in the wrong order.
+     * Reverse them to to get the right order: *)
+    revgoals
   | [ |- _ ] => idtac
   end;
   clear H.
@@ -464,10 +467,13 @@ Ltac fapply' T A contxt :=
       eapply (Weak _ U) in H; [| firstorder]
     end;
     fapply_without_quant H;
+    (* [fapply_without_quant] creates the subgoals in the wrong order.
+     * Reverse them to to get the right order: *)
+    revgoals;
     (* Evars should only be used for unification in [fapply].
-    * Therefore reject, if there are still evars visible. *)
+     * Therefore reject, if there are still evars visible. *)
     (* TODO: This is not optimal. If the goal contains evars, 
-    * H might still contain evars after unification and we would fail. *)
+     * H might still contain evars after unification and we would fail. *)
     tryif has_evar ltac:(type of H) 
     then fail 3 "Cannot find instance for variable. Try feapply?" 
     else clear H
@@ -652,8 +658,8 @@ Section FullLogic.
     induction x; cbn.
     - fapply ax_add_zero. (* Arguments are infered! *)
     - feapply ax_trans.
+      + fapply ax_add_rec. 
       + feapply ax_eq_succ. exact IHx.
-      + fapply ax_add_rec.
   Qed.
 
   Lemma num_mult_homomorphism x y : FA ⊢ ( num x ⊗ num y == num (x * y) ).
@@ -661,10 +667,10 @@ Section FullLogic.
     induction x; cbn.
     - fapply ax_mult_zero.
     - feapply ax_trans.
-      + apply num_add_homomorphism.
       + feapply ax_trans.
-        * feapply ax_eq_add. exact IHx. fapply ax_refl.
         * fapply ax_mult_rec.
+        * feapply ax_eq_add. fapply ax_refl. exact IHx.
+      + apply num_add_homomorphism.
   Qed.
 
 
@@ -677,8 +683,8 @@ Section FullLogic.
     - destruct F; repeat depelim v; cbn.
       * freflexivity.
       * fapply ax_eq_succ. apply IH. left.
-      * fapply ax_eq_add; apply IH. right. left. left.
-      * fapply ax_eq_mult; apply IH. right. left. left.
+      * fapply ax_eq_add; apply IH. left. right. left.
+      * fapply ax_eq_mult; apply IH. left. right. left.
   Qed.
 
   Lemma leibniz A phi t t' :
@@ -690,9 +696,9 @@ Section FullLogic.
     induction phi; cbn; intros. 1-3: fintros.
     - ctx.
     - destruct P. repeat depelim v. cbn in *. feapply ax_trans.
-      pose (leibniz_term t t' h0) as H'. fapply H'. fapply H.
-      feapply ax_trans. ctx.
-      pose (leibniz_term t' t h) as H'. fapply H'. fapply ax_sym. fapply H.
+      + feapply ax_trans. pose (leibniz_term t' t h) as H'. 
+        fapply H'. fapply ax_sym. fapply H. ctx.
+      + pose (leibniz_term t t' h0) as H'. fapply H'. fapply H.
     - destruct b. 1,2: specialize (IHphi1 t t' H); specialize (IHphi2 t t' H).
       + fsplit. 
         * fapply IHphi1. fdestruct 0. ctx. 
@@ -981,8 +987,8 @@ Section FullLogic.
     - now exfalso.
   Qed.
   
-  
-  
+
+
 
 
   (* Names test *)
