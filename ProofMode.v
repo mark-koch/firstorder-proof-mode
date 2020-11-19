@@ -735,26 +735,33 @@ Section FullLogic.
     | S ?n' => shift_n n' (t[↑])
     end.
 
+  Ltac vector_map_ltac v f :=
+    match v with
+    | Vector.nil _ => constr:(Vector.nil term)
+    | Vector.cons ?x ?v => 
+      let x' := f x in 
+      let v' := vector_map_ltac v f in
+      constr:(Vector.cons x' v')
+    end.
+
   (* Returns a new formula where all occurences of `t` are turned into
    * `($n)[up_n n t..]` and every other term `s` into `s[up_n n ↑][up_n t..]`,
    * where `n` is the quantor depth. *)
-  Ltac add_shifts' n G t :=
-    let f := add_shifts' n in 
+  Ltac add_shifts' n t G :=
+    let f := add_shifts' n t in 
     let t_shifted := shift_n n t in
     match G with
+    (* Terms: *)
     | t_shifted => constr:(($n)[up_n n t..])
     | $(?m) => constr:(($m)[up_n n ↑][up_n n t..])
-    | ?u --> ?v => let u' := f u t in let v' := f v t in constr:(u' --> v')
-    | ?u ∧ ?v => let u' := f u t in let v' := f v t in constr:(u' ∧ v')
-    | ?u ∨ ?v => let u' := f u t in let v' := f v t in constr:(u' ∨ v')
-    | ?u ⊕ ?v => let u' := f u t in let v' := f v t in constr:(u' ⊕ v')
-    | ?u ⊗ ?v => let u' := f u t in let v' := f v t in constr:(u' ⊗ v')
-    | ?u == ?v => let u' := f u t in let v' := f v t in constr:(u' == v')
-    | σ ?u => let u' := f u t in constr:(σ u')
-    | ∀ ?u => let u' := add_shifts' (S n) u t in constr:(∀ u')
-    | ∃ ?u => let u' := add_shifts' (S n) u t in constr:(∃ u')
+    | func ?fu ?vec => let vec' := vector_map_ltac vec f in constr:(func fu vec')
+    (* Formulas: *)
+    | fal => constr:(fal[up_n n ↑][up_n n t..])
+    | atom ?P ?vec => let vec' := vector_map_ltac vec f in constr:(atom P vec')
+    | bin ?op ?u ?v => let u' := f u in let v' := f v in constr:(bin op u' v')
+    | quant ?op ?u => let u' := add_shifts' (S n) t u in constr:(quant op u')
+    (* Fallback for variables which cannot be matched syntactically: *)
     | ?u => constr:(u[up_n n ↑][up_n n t..])
-            (* TODO: Why doesn't this work: *) (* tryif is_var u then constr:(u[↑][t..]) else fail *)
     end.
   Ltac add_shifts := add_shifts' 0.
 
@@ -782,7 +789,7 @@ Section FullLogic.
        *  created with the [add_shifts] tactic and proven in place. *)
       match goal with [ |- ?C ⊢ ?G ] => 
         let X := fresh in 
-        let G' := add_shifts G t in
+        let G' := add_shifts t G in
         enough (C ⊢ G') as X;
         [
           repeat match type of X with context K[ ?u[up_n ?n ↑][up_n ?n t..] ] =>
@@ -987,6 +994,8 @@ Section FullLogic.
     - now exfalso.
   Qed.
   
+
+
 
 
 
