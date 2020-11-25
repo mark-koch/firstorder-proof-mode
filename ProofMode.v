@@ -288,149 +288,6 @@ End IntroPattern.
 
 
 
-(** Basic tactics *)
-
-Ltac ctx := make_compatible ltac:(fun _ _ => apply Ctx; firstorder).
-
-Ltac fexfalso := make_compatible ltac:(fun _ _ => apply Exp).
-Ltac fsplit := make_compatible ltac:(fun _ _ => apply CI).
-Ltac fleft := make_compatible ltac:(fun _ _ => apply DI1).
-Ltac fright := make_compatible ltac:(fun _ _ => apply DI2).
-
-
-
-
-
-(* 
- * [fintro], [fintros] 
- * 
- * Similar to Coq. Identifiers need to be given as strings (e.g. 
- * [fintros "H1" "H2"]). With "?" you can automatically generate
- * a name (e.g. [fintros "?" "H"]).
- * 
- * Now also handles intro patterns! For now unneccessary spaces
- * are not alowed in intro patterns. E.g. instead of "[H1 | H2]",
- * write "[H1|H2]".
- *)
-
-Section FullLogic.
-  Variable p : peirce.
-
-  Lemma intro_and_destruct A s t G :
-    A ⊢ (s --> t --> G) -> A ⊢ (s ∧ t --> G).
-  Proof.
-    intros. now apply switch_conj_imp.
-  Qed.
-
-  Lemma intro_or_destruct A s t G :
-    A ⊢ (s --> G) -> A ⊢ (t --> G) -> A ⊢ (s ∨ t --> G).
-  Proof.
-    intros Hs Ht. apply II. eapply DE. ctx. 
-    eapply Weak in Hs. eapply IE. apply Hs. ctx. firstorder.
-    eapply Weak in Ht. eapply IE. apply Ht. ctx. firstorder.
-  Qed.
-End FullLogic.
-
-(* After ∀-intro, the context gets turned into `map (subst_form ↑) C`.
- * This tactic behaves like [cbn], except that it doesn't go into
- * `cblackbox` terms. *)
-Ltac simpl_map_subst C :=
-  match C with
-  | map (subst_form ?s) cnil => constr:(cnil)
-  | map (subst_form ?s) (ccons ?a ?t ?C') => 
-      let t' := eval cbn in (subst_form s t) in 
-      let C'' := simpl_map_subst (map (subst_form s) C') in
-      constr:(ccons a t' C'')
-  | map (subst_form ?s) (cblackbox ?A) =>
-      (* Test if we can drop the `map` because all identifiers 
-       * are bound insinde (as is the case in `FA`).
-       * The hack of matching on goal allows tactic execution
-       * although this tactic has a return value. *)
-      let check := match goal with _ => 
-        let H := fresh in assert (C = A) as H by reflexivity; clear H end in
-      constr:(cblackbox A)
-  | _ => C
-  end.
-
-Ltac fintro'' intro_pat :=
-  match intro_pat with
-  | patAnd ?p1 ?p2 => 
-      make_compatible ltac:(fun _ _ => apply intro_and_destruct);
-      fintro'' p1; fintro'' p2
-  | patOr ?p1 ?p2 =>
-      make_compatible ltac:(fun _ _ => apply intro_or_destruct);
-      [fintro'' p1 | fintro'' p2]
-  | patId ?id =>
-      match goal with 
-      | [ |- ?A ⊢ ∀ ?t ] => apply AllI
-      | [ |- ?A ⊢ (?s --> ?t) ] => apply II
-      (* Special care for intro in proof mode *)
-      | [ |- pm ?V ?C (∀ ?t) ] => make_compatible ltac:(fun _ _ => apply AllI)
-      | [ |- pm ?V ?C (named_quant All _ ?t) ] =>
-          apply AllI;
-          let name := 
-            match id with 
-            | "?" => new_name "x" V
-            | _ => match lookup V id with
-              | @None => id
-              | @Some _ _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 6 msg
-              end
-            end
-          in let C' := simpl_map_subst (map (subst_form ↑) C) in
-          change (pm (vcons name V) C' t);
-          update_binder_names
-      | [ |- pm ?V ?C (?s --> ?t) ] =>
-          apply II;
-          let name := 
-            match id with 
-            | "?" => new_name "H" C
-            | _ => match lookup C id with
-              | @None => id
-              | @Some _ _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 6 msg
-              end
-            end
-          in change (pm V (ccons name s C) t)
-      end
-  end.
-Ltac fintro' intro_pat := 
-  match eval cbn in (parse_intro_pattern intro_pat) with
-  | Some ?p => fintro'' p
-  | None => let msg := eval cbn in ("Invalid intro pattern: " ++ intro_pat) in fail 2 msg
-  end.
-Tactic Notation "fintro" := fintro' constr:("?").
-Tactic Notation "fintro" constr(H) := fintro' H.
-Tactic Notation "fintros" := repeat fintro.
-
-Ltac fintros' ids := 
-  match ids with
-  | [] => idtac 
-  | ?id::?ids' => fintro id; fintros' ids'
-  end.
-Tactic Notation "fintros" constr(H1) := fintros' constr:([H1]).
-Tactic Notation "fintros" constr(H1) constr(H2) := fintros' constr:([H1;H2]).
-Tactic Notation "fintros" constr(H1) constr(H2) constr(H3) := fintros' constr:([H1;H2;H3]).
-Tactic Notation "fintros" constr(H1) constr(H2) constr(H3) constr(H4) := fintros' constr:([H1;H2;H3;H4]).
-
-
-
-(* 
- * [ctx2hyp n as H]
- *
- * Lifts the n'th assumption in the ND context to a Coq hypothesis.
- *)
-Ltac ctx2hyp'' n H A := fun _ => 
-  match n with
-  | 0 => match A with ?t::_ => assert ([t] ⊢ t) as H by ctx end
-  | S ?n' => match A with _::?A' => ctx2hyp'' n' H A' end
-  end.
-
-Ltac ctx2hyp' n H := fun _ => 
-  match goal with [ |- ?A ⊢ _ ] => ctx2hyp'' n H A end.
-
-Tactic Notation "ctx2hyp" integer(n) "as" reference(H) := make_compatible ltac:(fun _ _ => ctx2hyp' n H).
-
-
-
 
 
 (* Spimplify terms that occur during specialization *)
@@ -464,6 +321,181 @@ Tactic Notation "simpl_subst" hyp(H) := (simpl_subst_hyp H).
 Tactic Notation "simpl_subst" := (simpl_subst_goal).
 
 
+
+
+
+
+(** Basic tactics *)
+
+Ltac ctx := make_compatible ltac:(fun _ _ => apply Ctx; firstorder).
+
+Ltac fexfalso := make_compatible ltac:(fun _ _ => apply Exp).
+Ltac fsplit := make_compatible ltac:(fun _ _ => apply CI).
+Ltac fleft := make_compatible ltac:(fun _ _ => apply DI1).
+Ltac fright := make_compatible ltac:(fun _ _ => apply DI2).
+
+
+
+
+
+(* 
+ * [fintro], [fintros] 
+ * 
+ * Similar to Coq. Identifiers need to be given as strings (e.g. 
+ * [fintros "H1" "H2"]). With "?" you can automatically generate
+ * a name (e.g. [fintros "?" "H"]).
+ * 
+ * Now also handles intro patterns! For now unneccessary spaces
+ * are not alowed in intro patterns. E.g. instead of "[H1 | H2]",
+ * write "[H1|H2]".
+ *)
+
+Section Fintro.
+  Variable p : peirce.
+
+  Lemma intro_and_destruct A s t G :
+    A ⊢ (s --> t --> G) -> A ⊢ (s ∧ t --> G).
+  Proof.
+    intros. now apply switch_conj_imp.
+  Qed.
+
+  Lemma intro_or_destruct A s t G :
+    A ⊢ (s --> G) -> A ⊢ (t --> G) -> A ⊢ (s ∨ t --> G).
+  Proof.
+    intros Hs Ht. apply II. eapply DE. ctx. 
+    eapply Weak in Hs. eapply IE. apply Hs. ctx. firstorder.
+    eapply Weak in Ht. eapply IE. apply Ht. ctx. firstorder.
+  Qed.
+
+  (* Lemmas for alternative ∀-intro and ∃-application.
+   * Taken from https://www.ps.uni-saarland.de/extras/fol-completeness/html/Undecidability.FOLC.FullND.html#nameless_equiv_all' *)
+  Lemma nameless_equiv_all' A phi :
+  exists t, A ⊢ phi[t..] <-> (map (subst_form ↑) A) ⊢ phi.
+  Admitted.
+  Lemma nameless_equiv_ex A phi psi :
+  exists t, (psi[t..]::A) ⊢ phi <-> (psi::map (subst_form ↑) A) ⊢ phi[↑].
+  Admitted.
+End Fintro.
+
+
+
+Ltac fintro_pat' pat :=
+  match pat with
+  | patAnd ?p1 ?p2 => 
+      make_compatible ltac:(fun _ _ => apply intro_and_destruct);
+      fintro_pat' p1; fintro_pat' p2
+  | patOr ?p1 ?p2 =>
+      make_compatible ltac:(fun _ _ => apply intro_or_destruct);
+      [fintro_pat' p1 | fintro_pat' p2]
+  | patId ?id =>
+      match goal with 
+      | [ |- ?A ⊢ ∀ ?t ] => 
+        let x := fresh "x" in
+        let H := fresh "H" in
+        apply AllI;
+        edestruct nameless_equiv_all' as [x H];
+        apply H;
+        clear H;
+        simpl_subst_goal
+      | [ |- ?A ⊢ (?s --> ?t) ] => apply II
+      (* Special care for intro in proof mode *)
+      | [ |- pm ?V ?C (∀ ?t) ] => make_compatible ltac:(fun _ _ => apply AllI)
+      | [ |- pm ?V ?C (named_quant All _ ?t) ] =>
+          apply AllI;
+          let name := 
+            match id with 
+            | "?" => new_name "x" V
+            | _ => match lookup V id with
+              | @None => id
+              | @Some _ _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 6 msg
+              end
+            end
+          in
+          let x := fresh "x" in
+          let H := fresh "H" in
+          edestruct nameless_equiv_all' as [x H];
+          apply H;
+          clear H;
+          simpl_subst_goal;
+          match goal with [ |- prv _ ?t'] => change (pm V C t') end;
+          update_binder_names
+      | [ |- pm ?V ?C (?s --> ?t) ] =>
+          apply II;
+          let name := 
+            match id with 
+            | "?" => new_name "H" C
+            | _ => match lookup C id with
+              | @None => id
+              | @Some _ _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 6 msg
+              end
+            end
+          in change (pm V (ccons name s C) t)
+      end
+  end.
+Ltac fintro_pat intro_pat := 
+  match eval cbn in (parse_intro_pattern intro_pat) with
+  | Some ?p => fintro_pat' p
+  | None => let msg := eval cbn in ("Invalid intro pattern: " ++ intro_pat) in fail 2 msg
+  end.
+Ltac fintro_ident x :=
+  let H := fresh "H" in
+  match goal with
+  | [ |- ?A ⊢ ∀ ?t ] => 
+    apply AllI;
+    edestruct nameless_equiv_all' as [x H];
+    apply H;
+    clear H;
+    simpl_subst_goal
+  | [ |- pm ?V ?C (named_quant All _ ?t) ] =>
+    apply AllI;
+    edestruct nameless_equiv_all' as [x H];
+    apply H;
+    clear H;
+    simpl_subst_goal;
+    match goal with [ |- prv _ ?t'] => change (pm V C t') end;
+    update_binder_names
+  end.
+Tactic Notation "fintro" := fintro_pat constr:("?").
+Tactic Notation "fintro" constr(H) := fintro_pat H.
+Tactic Notation "fintro" ident(x) := fintro_ident x.
+
+Tactic Notation "fintros" := repeat fintro.
+
+Tactic Notation "fintros" constr(H1) := fintro_pat H1.
+Tactic Notation "fintros" ident(H1) := fintro_ident H1.
+
+Tactic Notation "fintros" constr(H1) constr(H2) := fintro_pat H1; fintro_pat H2.
+Tactic Notation "fintros" ident(H1) constr(H2) := fintro_ident H1; fintro_pat H2.
+Tactic Notation "fintros" constr(H1) ident(H2) := fintro_pat H1; fintro_ident H2.
+Tactic Notation "fintros" ident(H1) ident(H2) := fintro_ident H1; fintro_ident H2.
+
+Tactic Notation "fintros" constr(H1) constr(H2) constr(H3) := fintro_pat H1; fintro_pat H2; fintro_pat H3.
+Tactic Notation "fintros" ident(H1) constr(H2) constr(H3) := fintro_ident H1; fintro_pat H2; fintro_pat H3.
+Tactic Notation "fintros" constr(H1) ident(H2) constr(H3) := fintro_pat H1; fintro_ident H2; fintro_pat H3.
+Tactic Notation "fintros" constr(H1) constr(H2) ident(H3) := fintro_pat H1; fintro_pat H2; fintro_ident H3.
+Tactic Notation "fintros" ident(H1) ident(H2) constr(H3) := fintro_ident H1; fintro_ident H2; fintro_pat H3.
+Tactic Notation "fintros" constr(H1) ident(H2) ident(H3) := fintro_pat H1; fintro_ident H2; fintro_ident H3.
+Tactic Notation "fintros" ident(H1) ident(H2) ident(H3) := fintro_ident H1; fintro_ident H2; fintro_ident H3.
+
+
+
+
+
+(* 
+ * [ctx2hyp n as H]
+ *
+ * Lifts the n'th assumption in the ND context to a Coq hypothesis.
+ *)
+Ltac ctx2hyp'' n H A := fun _ => 
+  match n with
+  | 0 => match A with ?t::_ => assert ([t] ⊢ t) as H by ctx end
+  | S ?n' => match A with _::?A' => ctx2hyp'' n' H A' end
+  end.
+
+Ltac ctx2hyp' n H := fun _ => 
+  match goal with [ |- ?A ⊢ _ ] => ctx2hyp'' n H A end.
+
+Tactic Notation "ctx2hyp" integer(n) "as" reference(H) := make_compatible ltac:(fun _ _ => ctx2hyp' n H).
 
 
 
@@ -661,9 +693,9 @@ match goal with
 end.
 
 Tactic Notation "fassert" constr(phi) := (make_compatible ltac:(fassert' phi)); [| fintro].
-Tactic Notation "fassert" constr(phi) "as" constr(H) := (make_compatible ltac:(fassert' phi)); [| fintro H].
+Tactic Notation "fassert" constr(phi) "as" constr(H) := (make_compatible ltac:(fassert' phi)); [| fintro_pat H].
 Tactic Notation "fassert" constr(phi) "by" tactic(tac) := (make_compatible ltac:(fassert' phi)); [tac | fintro].
-Tactic Notation "fassert" constr(phi) "as" constr(H) "by" tactic(tac) := (make_compatible ltac:(fassert' phi)); [tac | fintro H].
+Tactic Notation "fassert" constr(phi) "as" constr(H) "by" tactic(tac) := (make_compatible ltac:(fassert' phi)); [tac | fintro_pat H].
 
 
 
@@ -682,9 +714,9 @@ Ltac fdestruct' n pat :=
   match n with
   | 0 => 
       match goal with 
-      | [ |- prv _ _ ] => apply -> switch_imp; fintro'' pat
+      | [ |- prv _ _ ] => apply -> switch_imp; fintro_pat' pat
       | [ |- pm ?V (ccons _ ?t ?C) ?phi ] =>
-          apply -> switch_imp; change (pm V C (t --> phi)); fintro'' pat
+          apply -> switch_imp; change (pm V C (t --> phi)); fintro_pat' pat
       end
   | S ?n' =>
       match goal with 
@@ -850,9 +882,6 @@ Section FullLogic.
         { specialize (H0 var var). now rewrite !subst_var in H0. }
         assert (forall (t t' : term) u1 u2, FA ⊢ (t == t') -> FA ⊢ (phi[u1][t..][u2] --> phi[u1][t'..][u2])) as IH' by admit. *)
 
-        intros. fintros. 
-        change (((∀ phi)[t..][↑] :: map (subst_form ↑) A) ⊢ phi[up t'..]).
-        change ((∀ phi[up t..][up ↑] :: map (subst_form ↑) A) ⊢ phi[up t'..]).
         (* ? *)
   Admitted.
 
@@ -1063,10 +1092,9 @@ Section FullLogic.
   intro. exact ($0). Qed.
 
   (* Variable names instead of de Bruijn: *)
-  Goal FA ⊢ ∀ ∀ $1 == $0 --> $1 == zero ⊕ $0.
+  Goal FA ⊢ ∀ ∀ $1 == $0 --> σ $1 == zero ⊕ σ $0.
   Proof.
-    fstart. fintros "x" "y" "H". frewrite "H". frewrite (ax_add_zero "y").
-    (* frewrite (ax_add_zero (σ (test "y"))). *)
+    fstart. fintros x y "H". frewrite "H". frewrite (ax_add_zero (σ y)).
     fapply ax_refl.
   Qed.
 
