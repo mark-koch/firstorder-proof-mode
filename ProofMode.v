@@ -157,12 +157,12 @@ Ltac annotate_form' f idx phi :=
   end.
 
 Ltac add_binder_names :=
-  match goal with [ |- pm ?V ?C ?phi] =>
+  match goal with [ |- @pm _ _ ?p ?V ?C ?phi] =>
     let f := constr:(fun (n : nat) => List.nth n V "ERROR") in
     let annotate_form := annotate_form' f 0 in
     let phi' := annotate_form phi in
     let C' := map_ltac C annotate_form in
-    change (pm V C' phi')
+    change (@pm _ _ p V C' phi')
   end.
 Ltac update_binder_names := unfold named_quant; unfold named_var; add_binder_names.
 
@@ -209,13 +209,13 @@ Notation "'━━━━━━━━━━━━━━━━━━━━━━━
 
 
 (* Tactics to toggle proof mode *)
-Ltac fstart := match goal with [ |- ?A ⊢ ?phi ] => 
+Ltac fstart := match goal with [ |- @prv _ _ ?p ?A ?phi ] => 
   let C := create_context A in
-  change (pm vnil C phi);
+  change (@pm _ _ p vnil C phi);
   add_binder_names
 end.
-Ltac fstop := match goal with [ |- pm ?V ?C ?phi ] => 
-  change (prv C phi); unfold pm in *; unfold cnil; unfold ccons;  
+Ltac fstop := match goal with [ |- @pm _ _ ?p ?V ?C ?phi ] => 
+  change (@prv _ _ p C phi); unfold pm in *; unfold cnil; unfold ccons;  
   unfold cblackbox; unfold named_quant; unfold named_var 
 end.
 
@@ -229,12 +229,12 @@ end.
 Ltac make_compatible tac :=
   match goal with
   | [ |- prv ?A _ ] => tac A vnil
-  | [ |- pm ?V ?C _ ] => 
+  | [ |- @pm _ _ ?p ?V ?C _ ] => 
     fstop; 
     tac C V;
     match goal with 
-    | [ |- pm _ _ ?G ] => change (pm V C G) 
-    | [ |- prv _ ?G ] => change (pm V C G)
+    | [ |- pm _ _ ?G ] => change (@pm _ _ p V C G) 
+    | [ |- prv _ ?G ] => change (@pm _ _ p V C G)
     | _ => idtac 
     end;
     try update_binder_names (* [try] because some tactics add normal Coq goals *)
@@ -417,7 +417,7 @@ Ltac fintro_pat' pat :=
       | [ |- ?A ⊢ (?s --> ?t) ] => apply II
       (* Special care for intro in proof mode *)
       | [ |- pm ?V ?C (∀ ?t) ] => make_compatible ltac:(fun _ _ => apply AllI)
-      | [ |- pm ?V ?C (named_quant All _ ?t) ] =>
+      | [ |- @pm _ _ ?p ?V ?C (named_quant All _ ?t) ] =>
           apply AllI;
           let name := 
             match id with 
@@ -434,9 +434,9 @@ Ltac fintro_pat' pat :=
           apply H;
           clear H;
           simpl_subst_goal;
-          match goal with [ |- prv _ ?t'] => change (pm V C t') end;
+          match goal with [ |- @prv _ ?t'] => change (@pm _ _ p V C t') end;
           update_binder_names
-      | [ |- pm ?V ?C (?s --> ?t) ] =>
+      | [ |- @pm _ _ ?p ?V ?C (?s --> ?t) ] =>
           apply II;
           let name := 
             match id with 
@@ -446,7 +446,7 @@ Ltac fintro_pat' pat :=
               | @Some _ _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 6 msg
               end
             end
-          in change (pm V (ccons name s C) t)
+          in change (@pm _ _ p V (ccons name s C) t)
       end
   end.
 Ltac fintro_pat intro_pat := 
@@ -463,13 +463,13 @@ Ltac fintro_ident x :=
     apply H;
     clear H;
     simpl_subst_goal
-  | [ |- pm ?V ?C (named_quant All _ ?t) ] =>
+  | [ |- @pm _ _ ?p ?V ?C (named_quant All _ ?t) ] =>
     apply AllI;
     edestruct nameless_equiv_all' as [x H];
     apply H;
     clear H;
     simpl_subst_goal;
-    match goal with [ |- prv _ ?t'] => change (pm V C t') end;
+    match goal with [ |- prv _ ?t'] => change (@pm _ _ p V C t') end;
     update_binder_names
   end.
 Tactic Notation "fintro" := fintro_pat constr:("?").
@@ -580,10 +580,12 @@ Ltac fapply_without_quant H :=
   | ?A ⊢ (?s --> ?t) => 
     let Hs := fresh "Hs" in 
     let Ht := fresh "Ht" in 
-    enough (A ⊢ s) as Hs; 
-    [ assert (A ⊢ t) as Ht; 
-      [ apply (IE _ _ _ H Hs) | fapply_without_quant Ht; clear Hs; clear Ht ] 
-    | ]
+    match goal with [ |- @prv _ _ ?p _ _ ] =>
+      enough (@prv _ _ p A s) as Hs; 
+      [ assert (@prv _ _ p A t) as Ht; 
+        [ apply (IE _ _ _ H Hs) | fapply_without_quant Ht; clear Hs; clear Ht ] 
+      | ]
+    end
   end.
 
 Ltac instantiate_evars H := repeat eapply AllE in H.
@@ -594,13 +596,13 @@ Tactic Notation "is_hyp" hyp(H) := idtac.
 Ltac turn_into_hypothesis T H contxt := 
   tryif is_hyp T
   then assert (H := T)  (* Hypothesis *)
-  else match goal with [ |- ?C ⊢ _ ] => 
+  else match goal with [ |- @prv _ _ ?p ?C _ ] => 
     match type of T with
-    | form => assert (C ⊢ T) as H by ctx  (* Explicit form *)
-    | nat => let T' := nth C T in assert (C ⊢ T') as H by ctx  (* Idx in context *)
+    | form => assert (@prv _ _ p C T) as H by ctx  (* Explicit form *)
+    | nat => let T' := nth C T in assert (@prv _ _ p C T') as H by ctx  (* Idx in context *)
     | string => match lookup contxt T with  (* Context name *)
       | @None => let msg := eval cbn in ("Unknown identifier: " ++ T) in fail 4 msg
-      | @Some _ ?n => let T' := nth C n in assert (C ⊢ T') as H by ctx
+      | @Some _ ?n => let T' := nth C n in assert (@prv _ _ p C T') as H by ctx
       end
     end
   end.
@@ -805,6 +807,38 @@ Ltac fdestruct'' T pat :=
 Tactic Notation "fdestruct" constr(T) := fdestruct'' T "".
 Tactic Notation "fdestruct" constr(T) "as" constr(pat) := fdestruct'' T pat.
 
+
+
+(** Classical Logic *)
+
+Lemma case_help `{p : peirce} A phi psi :
+  A ⊢C (phi ∨ (phi --> ⊥) --> psi) -> A ⊢C psi.
+Proof.
+  intro H. eapply IE. apply H.
+  eapply IE. eapply Pc.
+  apply II. apply DI2. apply II.
+  eapply IE. apply Ctx. right. now left.
+  apply DI1. apply Ctx. now left.
+Qed.
+
+Lemma contradiction_help `{p : peirce} A phi :
+  A ⊢C ((phi --> ⊥) --> ⊥) -> A ⊢C phi.
+Proof.
+  intro H. eapply IE. eapply Pc. apply II.
+  apply Exp. eapply IE. eapply Weak. apply H. firstorder.
+  apply II. eapply IE. apply Ctx. right. now left.
+  apply Ctx. now left.
+Qed.
+
+
+Tactic Notation "case" "distinction" constr(phi) "as" constr(H1) constr(H2) := 
+  make_compatible ltac:(fun _ _ => apply (case_help _ phi)); 
+  let pat := eval cbn in ("[" ++ H1 ++ "|" ++ H2 ++ "]") in fintro_pat pat.
+Tactic Notation "case" "distinction" constr(phi) "as" constr(H) := case distinction phi as H H.
+Tactic Notation "case" "distinction" constr(phi) := case distinction phi as "".
+
+Tactic Notation "contradict" "as" constr(H) := make_compatible ltac:(fun _ _ => apply contradiction_help); fintro_pat H.
+Tactic Notation "contradict" := contradict as "?".
 
 
 
@@ -1115,6 +1149,19 @@ Section FullLogic.
     fapply ax_refl.
   Qed.
 
+
+  (* Classical logic *)
+  Goal forall phi, [] ⊢C (phi ∨ (phi --> ⊥)).
+  Proof.
+    intro. fstart. case distinction phi.
+    - fleft. fapply "H".
+    - fright. fapply "H".
+  Qed.
+
+  Goal forall phi, [] ⊢C (((phi --> ⊥) --> ⊥) --> phi).
+  Proof.
+    intro. fstart. fintros. contradict as "X". fapply "H". fapply "X".
+  Qed.
 
 
 
