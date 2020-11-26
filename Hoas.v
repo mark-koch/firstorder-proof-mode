@@ -16,6 +16,8 @@ Inductive bform `{funcs_signature, preds_signature, operators} :=
   | bQuant : quantop -> (bterm -> bform)  -> bform
   | bFree : (bterm -> bform)  -> bform.
 
+(* Coercion bterm_cor := bEmbedT. *)
+
 Fixpoint conv_term `{funcs_signature} i (b : bterm) : term :=
   match b with
   | bVar m => var (i - m)

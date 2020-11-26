@@ -174,9 +174,11 @@ Notation "C name : phi" := (ccons name phi C)
   (at level 1, C at level 200, phi at level 200,
   left associativity, format "C '//'  name  :  '[' phi ']'", only printing).
 
-Notation "∀ x , phi" := (named_quant All x phi) (at level 50, only printing).
-Notation "∃ x , phi" := (named_quant Ex x phi) (at level 50, only printing).
-(* Notation "§ x" := (named_var x) (at level 30, only printing, format "§ '/' x"). *)
+Notation "∀ x .. y , phi" := (named_quant All x ( .. (named_quant All y phi) .. )) (at level 50, only printing,
+  format "'[' '∀'  '/  ' x  ..  y ,  '/  ' phi ']'").
+Notation "∃ x .. y , phi" := (named_quant Ex x ( .. (named_quant Ex y phi) .. )) (at level 50, only printing,
+  format "'[' '∃'  '/  ' x  ..  y ,  '/  ' phi ']'").
+
 Notation "x" := (named_var x) (at level 1, only printing).
 
 Notation "" := vnil (only printing).
@@ -353,6 +355,16 @@ Ltac fright := make_compatible ltac:(fun _ _ => apply DI2).
 Section Fintro.
   Variable p : peirce.
 
+  (* Lemmas for alternative ∀-intro and ∃-application.
+   * Taken from https://www.ps.uni-saarland.de/extras/fol-completeness/html/Undecidability.FOLC.FullND.html#nameless_equiv_all' *)
+  Lemma nameless_equiv_all' A phi :
+    exists t, A ⊢ phi[t..] <-> (map (subst_form ↑) A) ⊢ phi.
+  Admitted.
+
+  Lemma nameless_equiv_ex A phi psi :
+    exists t, (psi[t..]::A) ⊢ phi <-> (psi::map (subst_form ↑) A) ⊢ phi[↑].
+  Admitted.
+
   Lemma intro_and_destruct A s t G :
     A ⊢ (s --> t --> G) -> A ⊢ (s ∧ t --> G).
   Proof.
@@ -366,15 +378,7 @@ Section Fintro.
     eapply Weak in Hs. eapply IE. apply Hs. ctx. firstorder.
     eapply Weak in Ht. eapply IE. apply Ht. ctx. firstorder.
   Qed.
-
-  (* Lemmas for alternative ∀-intro and ∃-application.
-   * Taken from https://www.ps.uni-saarland.de/extras/fol-completeness/html/Undecidability.FOLC.FullND.html#nameless_equiv_all' *)
-  Lemma nameless_equiv_all' A phi :
-  exists t, A ⊢ phi[t..] <-> (map (subst_form ↑) A) ⊢ phi.
-  Admitted.
-  Lemma nameless_equiv_ex A phi psi :
-  exists t, (psi[t..]::A) ⊢ phi <-> (psi::map (subst_form ↑) A) ⊢ phi[↑].
-  Admitted.
+  
 End Fintro.
 
 
@@ -382,8 +386,21 @@ End Fintro.
 Ltac fintro_pat' pat :=
   match pat with
   | patAnd ?p1 ?p2 => 
-      make_compatible ltac:(fun _ _ => apply intro_and_destruct);
-      fintro_pat' p1; fintro_pat' p2
+      (* And or Existential *)
+      match goal with
+      | _ => 
+        make_compatible ltac:(fun C _ =>
+          apply II; eapply ExE; [ apply Ctx; now left |
+            let x := fresh "x" in
+            let H := fresh "H" in
+            edestruct nameless_equiv_ex as [x H];
+            apply H; clear H; cbn; simpl_subst; apply -> switch_imp;
+            apply Weak with (A := C); [| firstorder] ]
+        ); fintro_pat' p2
+      | _ =>
+        make_compatible ltac:(fun _ _ => apply intro_and_destruct);
+        fintro_pat' p1; fintro_pat' p2
+      end
   | patOr ?p1 ?p2 =>
       make_compatible ltac:(fun _ _ => apply intro_or_destruct);
       [fintro_pat' p1 | fintro_pat' p2]
@@ -1165,19 +1182,41 @@ Section FullLogic.
         * fleft. fintro. fexfalso. fapply "IH1". ctx.
     - now exfalso.
   Qed.
+
+
+
+
+  Lemma numeral_subst_invariance : forall n rho, (num n)[rho] = num n.
+  Proof.
+    induction n.
+    - reflexivity.
+    - intros rho. cbn. now rewrite IHn.
+  Qed.
   
+  Ltac fexists x := make_compatible ltac:(fun _ _ => 
+    apply ExI with (t := x); 
+    simpl_subst;
+    rewrite !numeral_subst_invariance).
 
 
+  Require Import Hoas.
+  
+  Lemma division_theorem x y :
+    FA ⊢ << (∃ q r, (∃ k, r ⊕ k == σ bEmbedT (num y)) ∧ bEmbedT (num x) == r ⊕ q ⊗ σ bEmbedT (num y))%hoas.
+  Proof.
+    induction x; cbn; fstart.
+    - fexists zero. fexists zero. fsplit.
+      + fexists (σ num y). fapply ax_add_zero.
+      + frewrite (ax_mult_zero (σ num y)). frewrite (ax_add_zero zero). 
+        fapply ax_refl.
+    - fdestruct IHx as "[? [? [[? H1] H2]]]".
+      rewrite !numeral_subst_invariance.
+      rename x0 into q. rename x1 into r. rename x2 into k.
+      fexists q. fexists (σ r). fsplit.
+      + admit.
+      + frewrite (ax_add_rec (q ⊗ σ num y) r). fapply ax_eq_succ. fapply "H2".
+  Abort.
 
 End FullLogic.
-
-
-
-
-
-    
-
-
-
 
 
