@@ -385,22 +385,19 @@ End Fintro.
 
 Ltac fintro_pat' pat :=
   match pat with
-  | patAnd ?p1 ?p2 => 
-      (* And or Existential *)
-      match goal with
-      | _ => 
-        make_compatible ltac:(fun C _ =>
-          apply II; eapply ExE; [ apply Ctx; now left |
-            let x := fresh "x" in
-            let H := fresh "H" in
-            edestruct nameless_equiv_ex as [x H];
-            apply H; clear H; cbn; simpl_subst; apply -> switch_imp;
-            apply Weak with (A := C); [| firstorder] ]
-        ); fintro_pat' p2
-      | _ =>
-        make_compatible ltac:(fun _ _ => apply intro_and_destruct);
-        fintro_pat' p1; fintro_pat' p2
-      end
+  | patAnd ?p1 ?p2 => (* Existential *)
+      make_compatible ltac:(fun C _ =>
+        apply II; eapply ExE; [ apply Ctx; now left |
+          let x := fresh "x" in
+          let H := fresh "H" in
+          edestruct nameless_equiv_ex as [x H];
+          apply H; clear H; cbn; simpl_subst; apply -> switch_imp;
+          apply Weak with (A := C); [| firstorder] ]
+      ); 
+      fintro_pat' p2
+  | patAnd ?p1 ?p2 => (* Conjunction *)
+      make_compatible ltac:(fun _ _ => apply intro_and_destruct);
+      fintro_pat' p1; fintro_pat' p2  
   | patOr ?p1 ?p2 =>
       make_compatible ltac:(fun _ _ => apply intro_or_destruct);
       [fintro_pat' p1 | fintro_pat' p2]
