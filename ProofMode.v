@@ -3,6 +3,7 @@ Require Import Deduction.
 Require Import Tarski.
 Require Import VectorTech.
 Require Import PA.
+Require Import Theories.
 Require Import List.
 Require Import Lia.
 Require Import List.
@@ -22,19 +23,22 @@ Open Scope string_scope.
  * holds the assumption names as an extra argument.
  *)
 
-
-Definition variable_names := list string.
-Definition vnil : variable_names := @nil string.
-Definition vcons (s : string) (V : variable_names) : variable_names := @cons string s V.
-
-Definition pm {p cf cp} (V : variable_names) C phi := @prv p cf cp C phi.
+Definition pm {p cf cp} C phi := @prv p cf cp C phi.
 Arguments pm {_} {_} {_} _ _.
+
+Definition tpm {p cf cp} C phi := @tprv p cf cp C phi.
+Arguments tpm {_} {_} {_} _ _.
 
 Definition cnil := @nil form.
 Definition ccons (s : string) phi C := @cons form phi C.
-
 (* Special alias for unknown lists. Only used to indent with one space in Notation *)
-Definition cblackbox (A : list form) := A.  
+Definition cblackbox (A : list form) := A.
+
+Definition tnil :theory := fun _ => False.
+Definition tcons (s : string) phi (T : theory) : theory := extend T phi.
+(* Special alias for unknown theories. Only used to indent with one space in Notation *)
+Definition tblackbox (T : theory) := T.
+
 
 
 (** Context utilities *)
@@ -58,28 +62,29 @@ Ltac lookup' n C name :=
   match C with
   | ccons name _ _ => constr:(Some n) 
   | ccons _ _ ?C' => lookup' (S n) C' name
-  | vcons name _ => constr:(Some n) 
-  | vcons _ ?V' => lookup' (S n) V' name
+  | tcons name _ _ => constr:(Some n) 
+  | tcons _ _ ?T' => lookup' (S n) T' name
   | _ => None
   end.
 Ltac lookup := lookup' 0.
 
 Ltac nth A n :=
   match n with
-  | 0 => match A with ?t :: _ => t | ccons _ ?t _ => t | vcons ?t _ => t end
-  | S ?n' => match A with _ :: ?A' => nth A' n' | ccons _ _ ?A' => nth A' n' | vcons _ ?A' => nth A' n' end
+  | 0 => match A with ?t :: _ => t | ccons _ ?t _ => t | tcons _ ?t _ => t end
+  | S ?n' => match A with _ :: ?A' => nth A' n' | ccons _ _ ?A' => nth A' n' | tcons _ _ ?T' => nth T' n' end
   end.
 
 Ltac map_ltac A f :=
   match A with
   | nil => nil
   | cnil => cnil
-  | vnil => vnil
+  | tnil => tnil
   | @Vector.nil ?a => constr:(@Vector.nil a)
   | cblackbox ?A => constr:(cblackbox A)
+  | tblackbox ?A => constr:(tblackbox A)
   | cons ?x ?A' => let x' := f x in let A'' := map_ltac A' f in constr:(cons x' A'')
   | ccons ?s ?x ?A' => let x' := f x in let A'' := map_ltac A' f in constr:(ccons s x' A'')
-  | vcons ?x ?A' => let x' := f x in let A'' := map_ltac A' f in constr:(vcons x' A'')
+  | tcons ?s ?x ?A' => let x' := f x in let A'' := map_ltac A' f in constr:(ccons s x' A'')
   | Vector.cons ?x ?A' => let x' := f x in let A'' := map_ltac A' f in constr:(Vector.cons x' A'')
   end.
 
@@ -109,11 +114,21 @@ Ltac create_context' A :=
         | S ?n' => let s' := eval cbn in ("H" ++ nat_to_string n') in constr:((ccons s' phi c, S n))
       end
     end
+  | extend ?T' ?phi =>
+    let x := create_context' T' in match x with (?c, ?n) =>
+      match n with
+        | 0 => constr:((tcons "H" phi c, S n))
+        | S ?n' => let s' := eval cbn in ("H" ++ nat_to_string n') in constr:((tcons s' phi c, S n))
+      end
+    end
   | nil => constr:((cnil, 0))
   | ?A' => 
     (* If it's not a cons or nil, it's a variable/function call/... 
      * and we don't want to look into it *)
-    constr:((cblackbox A', 0))
+    match type of A with
+    | list form => constr:((cblackbox A', 0))
+    | theory => constr:((tblackbox A', 0))
+    end
   end.
 Ltac create_context A := let x := create_context' A in match x with (?c, _) => c end.
 
@@ -157,12 +172,19 @@ Ltac annotate_form' f idx phi :=
   end.
 
 Ltac add_binder_names :=
-  match goal with [ |- @pm _ _ ?p ?V ?C ?phi] =>
-    let f := constr:(fun (n : nat) => List.nth n V "ERROR") in
+  match goal with 
+  | [ |- @pm _ _ ?p ?C ?phi] =>
+    let f := constr:(fun (n : nat) => "ERROR") in
     let annotate_form := annotate_form' f 0 in
     let phi' := annotate_form phi in
     let C' := map_ltac C annotate_form in
-    change (@pm _ _ p V C' phi')
+    change (@pm _ _ p C' phi')
+  | [ |- @tpm _ _ ?p ?C ?phi] =>
+    let f := constr:(fun (n : nat) => "ERROR") in
+    let annotate_form := annotate_form' f 0 in
+    let phi' := annotate_form phi in
+    let C' := map_ltac C annotate_form in
+    change (@tpm _ _ p C' phi')
   end.
 Ltac update_binder_names := unfold named_quant; unfold named_var; add_binder_names.
 
@@ -174,6 +196,12 @@ Notation "C name : phi" := (ccons name phi C)
   (at level 1, C at level 200, phi at level 200,
   left associativity, format "C '//'  name  :  '[' phi ']'", only printing).
 
+Notation "" := tnil (only printing).
+Notation "A" := (tblackbox A) (at level 1, only printing, format " A").
+Notation "C name : phi" := (tcons name phi C)
+  (at level 1, C at level 200, phi at level 200,
+  left associativity, format "C '//'  name  :  '[' phi ']'", only printing).
+
 Notation "∀ x .. y , phi" := (named_quant All x ( .. (named_quant All y phi) .. )) (at level 50, only printing,
   format "'[' '∀'  '/  ' x  ..  y ,  '/  ' phi ']'").
 Notation "∃ x .. y , phi" := (named_quant Ex x ( .. (named_quant Ex y phi) .. )) (at level 50, only printing,
@@ -181,40 +209,19 @@ Notation "∃ x .. y , phi" := (named_quant Ex x ( .. (named_quant Ex y phi) .. 
 
 Notation "x" := (named_var x) (at level 1, only printing).
 
-Notation "" := vnil (only printing).
-Notation "V , name" := (vcons name V)
-  (at level 1, V at level 200, name at level 200,
-  left associativity, format "V ,  name", only printing).
-Notation "name" := (vcons name vnil) (at level 1, only printing).
-
-Notation " V ':' 'ℕ' C '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' phi" :=
-  (pm V C phi)
-  (at level 1, left associativity,
-  format " V  ':'  'ℕ' '//'  C '//' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' '//'  phi", only printing).
-
 Notation "C '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' phi" :=
-  (pm vnil C phi)
+  (pm C phi)
   (at level 1, left associativity,
   format " C '//' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' '//'  phi", only printing).
-
-Notation " V ':' 'ℕ' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' phi" :=
-  (pm V cnil phi)
-  (at level 1, left associativity,
-  format " V  ':'  'ℕ' '//' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' '//'  phi", only printing).
-
-Notation "'━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' phi" :=
-  (pm vnil cnil phi)
-  (at level 1, left associativity,
-  format "'//' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' '//'  phi", only printing).
 
 
 (* Tactics to toggle proof mode *)
 Ltac fstart := match goal with [ |- @prv _ _ ?p ?A ?phi ] => 
   let C := create_context A in
-  change (@pm _ _ p vnil C phi);
+  change (@pm _ _ p C phi);
   add_binder_names
 end.
-Ltac fstop := match goal with [ |- @pm _ _ ?p ?V ?C ?phi ] => 
+Ltac fstop := match goal with [ |- @pm _ _ ?p ?C ?phi ] => 
   change (@prv _ _ p C phi); unfold pm in *; unfold cnil; unfold ccons;  
   unfold cblackbox; unfold named_quant; unfold named_var 
 end.
@@ -228,13 +235,13 @@ end.
  * otherwise. *)
 Ltac make_compatible tac :=
   match goal with
-  | [ |- prv ?A _ ] => tac A vnil
-  | [ |- @pm _ _ ?p ?V ?C _ ] => 
+  | [ |- prv ?A _ ] => tac A
+  | [ |- @pm _ _ ?p ?C _ ] => 
     fstop; 
-    tac C V;
+    tac C;
     match goal with 
-    | [ |- pm _ _ ?G ] => change (@pm _ _ p V C G) 
-    | [ |- prv _ ?G ] => change (@pm _ _ p V C G)
+    | [ |- pm _ _ ?G ] => change (@pm _ _ p C G) 
+    | [ |- prv _ ?G ] => change (@pm _ _ p C G)
     | _ => idtac 
     end;
     try update_binder_names (* [try] because some tactics add normal Coq goals *)
@@ -329,12 +336,12 @@ Tactic Notation "simpl_subst" := (simpl_subst_goal).
 
 (** Basic tactics *)
 
-Ltac ctx := make_compatible ltac:(fun _ _ => apply Ctx; firstorder).
+Ltac ctx := make_compatible ltac:(fun _ => apply Ctx; firstorder).
 
-Ltac fexfalso := make_compatible ltac:(fun _ _ => apply Exp).
-Ltac fsplit := make_compatible ltac:(fun _ _ => apply CI).
-Ltac fleft := make_compatible ltac:(fun _ _ => apply DI1).
-Ltac fright := make_compatible ltac:(fun _ _ => apply DI2).
+Ltac fexfalso := make_compatible ltac:(fun _ => apply Exp).
+Ltac fsplit := make_compatible ltac:(fun _ => apply CI).
+Ltac fleft := make_compatible ltac:(fun _ => apply DI1).
+Ltac fright := make_compatible ltac:(fun _ => apply DI2).
 
 
 
@@ -386,7 +393,7 @@ End Fintro.
 Ltac fintro_pat' pat :=
   match pat with
   | patAnd ?p1 ?p2 => (* Existential *)
-      make_compatible ltac:(fun C _ =>
+      make_compatible ltac:(fun C =>
         apply II; eapply ExE; [ apply Ctx; now left |
           let x := fresh "x" in
           let H := fresh "H" in
@@ -396,10 +403,10 @@ Ltac fintro_pat' pat :=
       ); 
       fintro_pat' p2
   | patAnd ?p1 ?p2 => (* Conjunction *)
-      make_compatible ltac:(fun _ _ => apply intro_and_destruct);
+      make_compatible ltac:(fun _ => apply intro_and_destruct);
       fintro_pat' p1; fintro_pat' p2  
   | patOr ?p1 ?p2 =>
-      make_compatible ltac:(fun _ _ => apply intro_or_destruct);
+      make_compatible ltac:(fun _ => apply intro_or_destruct);
       [fintro_pat' p1 | fintro_pat' p2]
   | patId ?id =>
       match goal with 
@@ -413,10 +420,10 @@ Ltac fintro_pat' pat :=
         simpl_subst_goal
       | [ |- ?A ⊢ (?s --> ?t) ] => apply II
       (* Special care for intro in proof mode *)
-      | [ |- pm ?V ?C (∀ ?t) ] => make_compatible ltac:(fun _ _ => apply AllI)
-      | [ |- @pm _ _ ?p ?V ?C (named_quant All _ ?t) ] =>
+      | [ |- pm ?C (∀ ?t) ] => make_compatible ltac:(fun _ => apply AllI)
+      | [ |- @pm _ _ ?p ?C (named_quant All _ ?t) ] =>
           apply AllI;
-          let name := 
+          (* let name := 
             match id with 
             | "?" => new_name "x" V
             | _ => match lookup V id with
@@ -424,16 +431,16 @@ Ltac fintro_pat' pat :=
               | @Some _ _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 6 msg
               end
             end
-          in
+          in *)
           let x := fresh "x" in
           let H := fresh "H" in
           edestruct nameless_equiv_all' as [x H];
           apply H;
           clear H;
           simpl_subst_goal;
-          match goal with [ |- @prv _ ?t'] => change (@pm _ _ p V C t') end;
+          match goal with [ |- @prv _ ?t'] => change (@pm _ _ p C t') end;
           update_binder_names
-      | [ |- @pm _ _ ?p ?V ?C (?s --> ?t) ] =>
+      | [ |- @pm _ _ ?p ?C (?s --> ?t) ] =>
           apply II;
           let name := 
             match id with 
@@ -443,7 +450,7 @@ Ltac fintro_pat' pat :=
               | @Some _ _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 6 msg
               end
             end
-          in change (@pm _ _ p V (ccons name s C) t)
+          in change (@pm _ _ p (ccons name s C) t)
       end
   end.
 Ltac fintro_pat intro_pat := 
@@ -460,13 +467,13 @@ Ltac fintro_ident x :=
     apply H;
     clear H;
     simpl_subst_goal
-  | [ |- @pm _ _ ?p ?V ?C (named_quant All _ ?t) ] =>
+  | [ |- @pm _ _ ?p ?C (named_quant All _ ?t) ] =>
     apply AllI;
     edestruct nameless_equiv_all' as [x H];
     apply H;
     clear H;
     simpl_subst_goal;
-    match goal with [ |- prv _ ?t'] => change (@pm _ _ p V C t') end;
+    match goal with [ |- prv _ ?t'] => change (@pm _ _ p C t') end;
     update_binder_names
   end.
 Tactic Notation "fintro" := fintro_pat constr:("?").
@@ -509,7 +516,7 @@ Ltac ctx2hyp'' n H A := fun _ =>
 Ltac ctx2hyp' n H := fun _ => 
   match goal with [ |- ?A ⊢ _ ] => ctx2hyp'' n H A end.
 
-Tactic Notation "ctx2hyp" integer(n) "as" reference(H) := make_compatible ltac:(fun _ _ => ctx2hyp' n H).
+Tactic Notation "ctx2hyp" integer(n) "as" reference(H) := make_compatible ltac:(fun _ => ctx2hyp' n H).
 
 
 
@@ -522,19 +529,11 @@ Tactic Notation "ctx2hyp" integer(n) "as" reference(H) := make_compatible ltac:(
  * with `x1, x2, ..., xn`.
  *)
 
-Ltac fspecialize_list H A var_names := 
+Ltac fspecialize_list H A := 
   match A with
   | [] => simpl_subst H
-  | ?a::?A' => 
-      let x := match type of a with
-        | string => match lookup var_names a with  (* Free variable name *)
-          | @None => let msg := eval cbn in ("Unknown identifier: " ++ a) in fail 10 msg
-          | @Some _ ?n => constr:($n)
-          end
-        | _ => a
-        end 
-      in tryif 
-        apply (fun H => IE _ _ _ H x) in H
+  | ?x::?A' =>
+      tryif apply (fun H => IE _ _ _ H x) in H
       then idtac
       else (
         (* For some reason we cannot directly [apply (AllE _ x)]
@@ -542,16 +541,16 @@ Ltac fspecialize_list H A var_names :=
         let x' := fresh "x" in 
         eapply (AllE _ ?[x']) in H; 
         instantiate (x' := x) );
-    fspecialize_list H A' var_names
+    fspecialize_list H A'
   end.
 
-Tactic Notation "fspecialize" "(" hyp(H) constr(x1) ")" := make_compatible ltac:(fun _ V => fspecialize_list H constr:([x1]) V).
-Tactic Notation "fspecialize" "(" hyp(H) constr(x1) constr(x2) ")" := make_compatible ltac:(fun _ V => fspecialize_list H constr:([x1; x2]) V).
-Tactic Notation "fspecialize" "(" hyp(H) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(fun _ V => fspecialize_list H constr:([x1;x2;x3]) V).
+Tactic Notation "fspecialize" "(" hyp(H) constr(x1) ")" := make_compatible ltac:(fun _ => fspecialize_list H constr:([x1])).
+Tactic Notation "fspecialize" "(" hyp(H) constr(x1) constr(x2) ")" := make_compatible ltac:(fun _ => fspecialize_list H constr:([x1; x2])).
+Tactic Notation "fspecialize" "(" hyp(H) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(fun _ => fspecialize_list H constr:([x1;x2;x3])).
 
-Tactic Notation "fspecialize" hyp(H) "with" constr(x1) := make_compatible ltac:(fun _ V => fspecialize_list H constr:([x1]) V).
-Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) := make_compatible ltac:(fun _ V => fspecialize_list H constr:([x1;x2]) V).
-Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) constr(x3) := make_compatible ltac:(fun _ V => fspecialize_list H constr:([x1;x2;x3]) V).
+Tactic Notation "fspecialize" hyp(H) "with" constr(x1) := make_compatible ltac:(fun _ => fspecialize_list H constr:([x1])).
+Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) := make_compatible ltac:(fun _ => fspecialize_list H constr:([x1;x2])).
+Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) constr(x3) := make_compatible ltac:(fun _ => fspecialize_list H constr:([x1;x2;x3])).
 
 
 
@@ -615,7 +614,7 @@ Ltac assert_premises H :=
       [|specialize (H H'); clear H'; assert_premises H ]
   end.
 
-Ltac feapply' T A := fun contxt free_vars =>
+Ltac feapply' T A := fun contxt =>
   let H := fresh "H" in
   turn_into_hypothesis T H contxt;
   (* If `H` containes has further Coq premises before the formula 
@@ -625,7 +624,7 @@ Ltac feapply' T A := fun contxt free_vars =>
    * additional goals. *)
   match goal with
   | [ |- _ ⊢ _ ] =>
-    fspecialize_list H A free_vars;
+    fspecialize_list H A;
     instantiate_evars H;
     simpl_subst H;
     match goal with [ |- ?C ⊢ _ ] => 
@@ -639,7 +638,7 @@ Ltac feapply' T A := fun contxt free_vars =>
   end;
   clear H.
 
-Ltac fapply' T A contxt free_vars :=
+Ltac fapply' T A contxt :=
   let H := fresh "H" in
   turn_into_hypothesis T H contxt;
   (* If `H` containes has further Coq premises before the formula 
@@ -649,7 +648,7 @@ Ltac fapply' T A contxt free_vars :=
     * additional goals. *)
    match goal with
    | [ |- _ ⊢ _ ] =>
-    fspecialize_list H A free_vars; 
+    fspecialize_list H A; 
     instantiate_evars H; 
     simpl_subst H;
     match goal with [ |- ?U ⊢ _ ] => 
@@ -696,7 +695,7 @@ Proof.
   intros H1 H2. eapply IE. exact H2. exact H1.
 Qed.
 
-Ltac fassert' phi := fun _ _ =>
+Ltac fassert' phi := fun _ =>
 match goal with
 | [ |- ?A ⊢ ?psi ] =>
   let H1 := fresh "H" in
@@ -731,16 +730,16 @@ Ltac fdestruct' n pat :=
   | 0 => 
       match goal with 
       | [ |- prv _ _ ] => apply -> switch_imp; fintro_pat' pat
-      | [ |- pm ?V (ccons _ ?t ?C) ?phi ] =>
-          apply -> switch_imp; change (pm V C (t --> phi)); fintro_pat' pat
+      | [ |- pm (ccons _ ?t ?C) ?phi ] =>
+          apply -> switch_imp; change (pm C (t --> phi)); fintro_pat' pat
       end
   | S ?n' =>
       match goal with 
       | [ |- prv _ _ ] => apply -> switch_imp; fdestruct' n' pat; apply <- switch_imp
-      | [ |- pm ?V (ccons ?a ?t ?C) ?phi ] => 
-          apply -> switch_imp; change (pm V C (t --> phi)); fdestruct' n' pat;
-          match goal with [ |- pm ?V ?C' (t --> phi) ] => 
-            apply <- switch_imp; change (pm V (ccons a t C') phi)
+      | [ |- pm  (ccons ?a ?t ?C) ?phi ] => 
+          apply -> switch_imp; change (pm C (t --> phi)); fdestruct' n' pat;
+          match goal with [ |- pm ?C' (t --> phi) ] => 
+            apply <- switch_imp; change (pm (ccons a t C') phi)
           end
       end
   end.
@@ -769,10 +768,10 @@ Ltac fdestruct'' T pat :=
         | prv _ ?s => enough (A ⊢ (s --> t)) as X by (feapply X; feapply H)
         | pm _ _ ?s => enough (A ⊢ (s --> t)) as X by (feapply X; feapply H)
         end
-    | [ |- pm ?V ?A ?t ] =>
+    | [ |- pm ?A ?t ] =>
         match type of H with 
-        | prv _ ?s => enough (pm V A (s --> t)) as X by (feapply X; feapply H)
-        | pm _ _ ?s => enough (pm V A (s --> t)) as X by (feapply X; feapply H)
+        | prv _ ?s => enough (pm A (s --> t)) as X by (feapply X; feapply H)
+        | pm _ ?s => enough (pm A (s --> t)) as X by (feapply X; feapply H)
         end
     end;
     fintro "?"; fdestruct'' 0 pat; clear H
@@ -780,7 +779,7 @@ Ltac fdestruct'' T pat :=
   else (
     let n := match type of T with 
       | nat => T 
-      | string => match goal with [ |- pm ?V ?C _ ] => 
+      | string => match goal with [ |- pm ?C _ ] => 
         match lookup C T with 
         | @Some _ ?n' => n'
         | @None => let msg := eval cbn in ("Unknown identifier: " ++ T) in fail 3 msg
@@ -791,7 +790,7 @@ Ltac fdestruct'' T pat :=
       | "" => 
         match goal with 
         | [ |- prv ?A _ ] => let t := nth A n in create_pattern t 
-        | [ |- pm _ ?C _ ] => let t := nth C n in create_pattern t 
+        | [ |- pm ?C _ ] => let t := nth C n in create_pattern t 
         end
       | _ => 
         match eval cbn in (parse_intro_pattern pat) with 
@@ -829,12 +828,12 @@ Qed.
 
 
 Tactic Notation "case" "distinction" constr(phi) "as" constr(H1) constr(H2) := 
-  make_compatible ltac:(fun _ _ => apply (case_help _ phi)); 
+  make_compatible ltac:(fun _ => apply (case_help _ phi)); 
   let pat := eval cbn in ("[" ++ H1 ++ "|" ++ H2 ++ "]") in fintro_pat pat.
 Tactic Notation "case" "distinction" constr(phi) "as" constr(H) := case distinction phi as H H.
 Tactic Notation "case" "distinction" constr(phi) := case distinction phi as "".
 
-Tactic Notation "contradict" "as" constr(H) := make_compatible ltac:(fun _ _ => apply contradiction_help); fintro_pat H.
+Tactic Notation "contradict" "as" constr(H) := make_compatible ltac:(fun _ => apply contradiction_help); fintro_pat H.
 Tactic Notation "contradict" := contradict as "?".
 
 
@@ -986,10 +985,10 @@ Section FullLogic.
     | _ => G
     end.
 
-  Ltac frewrite' T A back := fun contxt free_vars =>
+  Ltac frewrite' T A back := fun contxt =>
     let H := fresh "H" in
     turn_into_hypothesis T H contxt;
-    fspecialize_list H A free_vars; 
+    fspecialize_list H A; 
     instantiate_evars H; 
     simpl_subst H;
     match type of H with _ ⊢ (?_t == ?_t') =>
@@ -1237,7 +1236,7 @@ Section FullLogic.
     - intros rho. cbn. now rewrite IHn.
   Qed.
   
-  Ltac fexists x := make_compatible ltac:(fun _ _ => 
+  Ltac fexists x := make_compatible ltac:(fun _ => 
     apply ExI with (t := x); 
     simpl_subst;
     rewrite !numeral_subst_invariance).
