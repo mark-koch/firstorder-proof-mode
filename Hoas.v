@@ -25,6 +25,8 @@ Fixpoint conv_term `{funcs_signature} i (b : bterm) : term :=
   | bFunc f v => func f (Vector.map (conv_term i) v)
   end.
 
+Coercion bEmbedT : term >-> bterm.
+
 Fixpoint conv `{funcs_signature, preds_signature, operators} i (phi : bform) : form :=
   match phi with
   | bFal => fal
