@@ -41,6 +41,94 @@ Definition tblackbox (T : theory) := T.
 
 
 
+(** Overload deduction rules to also work for theories: *)
+
+Class DeductionRules (context : Type) (ent : context -> form -> Type) (cons : form -> context -> context) (map : (form -> form) -> context -> context) (In : form -> context -> Prop) :=
+{
+  II A phi psi : ent (cons phi A) psi -> ent A (phi --> psi) ;
+  IE A phi psi : ent A (phi --> psi) -> ent A phi -> ent A  psi ;
+  AllI A phi : ent (map (subst_form ↑) A) phi -> ent A (∀ phi) ;
+  AllE A t phi : ent A (∀ phi) -> ent A (phi[t..]) ;
+  ExI A t phi : ent A (phi[t..]) -> ent A (∃ phi) ;
+  ExE A phi psi : ent A (∃ phi) -> ent (cons phi (map (subst_form ↑) A)) (psi[↑]) -> ent A psi ;
+  Exp A phi : ent A ⊥ -> ent A phi ;
+  Ctx A phi : In phi A -> ent A phi ;
+  CI A phi psi : ent A phi -> ent A psi -> ent A (phi ∧ psi) ;
+  CE1 A phi psi : ent A (phi ∧ psi) -> ent A phi ;
+  CE2 A phi psi : ent A (phi ∧ psi) -> ent A psi ;
+  DI1 A phi psi : ent A phi -> ent A (phi ∨ psi) ;
+  DI2 A phi psi : ent A psi -> ent A (phi ∨ psi) ;
+  DE A phi psi theta : ent A (phi ∨ psi) -> ent (cons phi A) theta -> ent (cons psi A) theta -> ent A theta ;
+}.
+
+Class ClassicalDeductionRules (context : Type) (ent : context -> form -> Type) :=
+{
+  Pc A phi psi : ent A (((phi --> psi) --> phi) --> phi)
+}.
+
+Class WeakClass (context : Type) (ent : context -> form -> Type) (incl : context -> context -> Prop) :=
+{
+  Weak A B phi : ent A phi -> incl A B -> ent B phi
+}.
+
+Instance prv_DeductionRules `{peirce} : DeductionRules (list form) prv cons (@List.map form form) (@In form) := 
+{| 
+  II := Deduction.II ;
+  IE := Deduction.IE ;
+  AllI := Deduction.AllI ;
+  AllE := Deduction.AllE ;
+  ExI := Deduction.ExI ;
+  ExE := Deduction.ExE ;
+  Exp := Deduction.Exp ;
+  Ctx := Deduction.Ctx ;
+  CI := Deduction.CI ;
+  CE1 := Deduction.CE1 ;
+  CE2 := Deduction.CE2 ;
+  DI1 := Deduction.DI1 ;
+  DI2 := Deduction.DI2 ;
+  DE := Deduction.DE ;
+|}.
+
+Instance prv_ClassicalDeductionRules : ClassicalDeductionRules (list form) (@prv _ _ class) := 
+{| 
+  Pc := Deduction.Pc
+|}.
+
+Instance prv_WeakClass `{peirce} : WeakClass (list form) prv (@List.incl form) := 
+{| 
+  Weak := Deduction.Weak
+|}.
+
+Instance tprv_DeductionRules `{peirce} : DeductionRules theory tprv (fun a b => extend b a) mapT (fun a b => in_theory b a) := 
+{| 
+  II := Theories.T_II ;
+  IE := Theories.T_IE ;
+  AllI := Theories.T_AllI ;
+  AllE := Theories.T_AllE ;
+  ExI := Theories.T_ExI ;
+  ExE := Theories.T_ExE ;
+  Exp := Theories.T_Exp ;
+  Ctx := Theories.T_Ctx ;
+  CI := Theories.T_CI ;
+  CE1 := Theories.T_CE1 ;
+  CE2 := Theories.T_CE2 ;
+  DI1 := Theories.T_DI1 ;
+  DI2 := Theories.T_DI2 ;
+  DE := Theories.T_DE ;
+|}.
+
+Instance tprv_ClassicalDeductionRules : ClassicalDeductionRules theory (@tprv _ _ class) := 
+{| 
+  Pc := Theories.T_Pc
+|}.
+
+Instance tprv_WeakClass `{peirce} : WeakClass theory tprv subset_T := 
+{| 
+  Weak := Theories.WeakT
+|}.
+
+
+
 (** Context utilities *)
 
 Definition digit_to_string n := match n with
@@ -214,17 +302,27 @@ Notation "C '━━━━━━━━━━━━━━━━━━━━━━�
   (at level 1, left associativity,
   format " C '//' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' '//'  phi", only printing).
 
+Notation "T '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' phi" :=
+  (tpm T phi)
+  (at level 1, left associativity,
+  format " T '//' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' '//'  phi", only printing).
+
 
 (* Tactics to toggle proof mode *)
-Ltac fstart := match goal with [ |- @prv _ _ ?p ?A ?phi ] => 
-  let C := create_context A in
-  change (@pm _ _ p C phi);
-  add_binder_names
-end.
-Ltac fstop := match goal with [ |- @pm _ _ ?p ?C ?phi ] => 
-  change (@prv _ _ p C phi); unfold pm in *; unfold cnil; unfold ccons;  
-  unfold cblackbox; unfold named_quant; unfold named_var 
-end.
+Ltac fstart := 
+  match goal with 
+  | [ |- @prv _ _ ?p ?A ?phi ] => let C := create_context A in change (@pm _ _ p C phi)
+  | [ |- @tprv _ _ ?p ?T ?phi ] => let C := create_context T in change (@tpm _ _ p C phi)
+  end;
+  add_binder_names.
+Ltac fstop := 
+  match goal with 
+  | [ |- @pm _ _ ?p ?C ?phi ] => change (@prv _ _ p C phi)
+  | [ |- @tpm _ _ ?p ?C ?phi ] => change (@tprv _ _ p C phi)
+  end;
+  unfold pm in *; unfold cnil; unfold ccons;unfold cblackbox; 
+  unfold tpm in *; unfold tnil; unfold tcons;unfold tblackbox; 
+  unfold named_quant; unfold named_var.
 
 
 (* All the tactics defined below work with the original `prv` type.
@@ -236,15 +334,24 @@ end.
 Ltac make_compatible tac :=
   match goal with
   | [ |- prv ?A _ ] => tac A
+  | [ |- tprv ?T _ ] => tac T
   | [ |- @pm _ _ ?p ?C _ ] => 
-    fstop; 
-    tac C;
-    match goal with 
-    | [ |- pm _ _ ?G ] => change (@pm _ _ p C G) 
-    | [ |- prv _ ?G ] => change (@pm _ _ p C G)
-    | _ => idtac 
-    end;
-    try update_binder_names (* [try] because some tactics add normal Coq goals *)
+      fstop; 
+      tac C;
+      match goal with 
+      | [ |- pm _ _ ?G ] => change (@pm _ _ p C G) 
+      | [ |- prv _ ?G ] => change (@pm _ _ p C G)
+      | _ => idtac 
+      end;
+      try update_binder_names (* [try] because some tactics add normal Coq goals *)
+  | [ |- @tpm _ _ ?p ?C _ ] => 
+      fstop;
+      tac C;
+      match goal with 
+      | [ |- tprv _ ?G ] => change (@tpm _ _ p C G)
+      | _ => idtac 
+      end;
+      try update_binder_names (* [try] because some tactics add normal Coq goals *)
   end.
 
 
@@ -306,6 +413,9 @@ Ltac simpl_subst_hyp H :=
   | context C[subst_term ?s ?t] => let H' := context C[t[s]] in change H' in H
   end;
   repeat match type of H with
+  | context C[subst_form ?s ?t] => let H' := context C[t[s]] in change H' in H
+  end;
+  repeat match type of H with
   | context C[?t[S >> var]] => let H' := context C[t[↑]] in change H' in H
   end;
   try rewrite !up_term in H;
@@ -317,6 +427,9 @@ Ltac simpl_subst_goal :=
   cbn;
   repeat match goal with
   | [ |- context C[subst_term ?s ?t] ] => let G := context C[t[s]] in change G
+  end;
+  repeat match goal with
+  | [ |- context C[subst_form ?s ?t] ] => let G := context C[t[s]] in change G
   end;
   repeat match goal with
   | [ |- context C[?t[S >> var]] ] => let G := context C[t[↑]] in change G
@@ -381,14 +494,115 @@ Section Fintro.
   Lemma intro_or_destruct A s t G :
     A ⊢ (s --> G) -> A ⊢ (t --> G) -> A ⊢ (s ∨ t --> G).
   Proof.
-    intros Hs Ht. apply II. eapply DE. ctx. 
+    intros Hs Ht. apply II. eapply DE. ctx.
     eapply Weak in Hs. eapply IE. apply Hs. ctx. firstorder.
     eapply Weak in Ht. eapply IE. apply Ht. ctx. firstorder.
   Qed.
-  
+
+  Lemma intro_and_destruct_T T s t G :
+    T ⊩ (s --> t --> G) -> T ⊩ (s ∧ t --> G).
+  Proof.
+    intros. apply II. apply (IE _ t). apply (IE _ s).
+    eapply Weak. apply H. firstorder.
+    eapply CE1, Ctx; firstorder.
+    eapply CE2, Ctx; firstorder.
+  Qed.
+
+  Lemma intro_or_destruct_T T s t G :
+    T ⊩ (s --> G) -> T ⊩ (t --> G) -> T ⊩ (s ∨ t --> G).
+  Proof.
+    intros Hs Ht. apply II. eapply DE. ctx.
+    eapply Weak in Hs. eapply IE. apply Hs. ctx. firstorder.
+    eapply Weak in Ht. eapply IE. apply Ht. ctx. firstorder.
+  Qed.
+
+  Lemma subst_zero phi x :
+    $0 = x -> phi = phi[fun n => match n with 0 => x | S n => $(S n) end].
+  Proof.
+    intros. symmetry. apply subst_id. intros [|]; cbn. now rewrite H. reflexivity.
+  Qed.
+
+  Lemma mapT_step f a T1 T2 :
+    subset_T T1 (mapT f T2) -> subset_T (extend T1 (f a)) (mapT f (extend T2 a)).
+  Proof.
+    intros H psi H1. destruct H1 as [H1|H1].
+    - destruct (H psi H1) as [rho [H2 H3]]. exists rho. split. now left. assumption.
+    - exists a. split. now right. auto.
+  Qed.
+
 End Fintro.
 
 
+Ltac name_from_pattern C id :=
+  match id with 
+  | "?" => new_name "H" C
+  | _ => match lookup C id with
+    | @None => id
+    | @Some _ _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 7 msg
+    end
+  end.
+
+(* Syntactically evaluate `mapT f (T ⋄ a ⋄ b ⋄ c)` to
+ * `(mapT f T) ⋄ f a ⋄ f b ⋄ f c` like it would happen using
+ * [cbn] for map in normal lists. *)
+Ltac eval_mapT M :=
+  match M with
+  | mapT ?f (extend ?T ?a) => let T' := eval_mapT (mapT f T) in constr:(extend T' (f a))
+  | mapT ?f (tcons ?s ?a ?T) => let T' := eval_mapT (mapT f T) in constr:(tcons s (f a) T')
+  | mapT ?f (tblackbox ?T) => constr:(tblackbox (mapT f ?T))
+  | _ => M
+  end.
+
+(* Replace `mapT f (T ⋄ a ⋄ b ⋄ c)` in the context with 
+ * `(mapT f T) ⋄ f a ⋄ f b ⋄ f c`. *)
+Ltac simpl_context_mapT :=
+  match goal with 
+  | [ |- tprv ?T ?phi ] =>
+      let T' := eval_mapT T in
+      let X := fresh in
+      enough (tprv T' phi) as X; [ 
+        eapply Weak; [now apply X | repeat apply mapT_step; apply subset_refl ]
+      |]
+  | [ |- tpm ?T ?phi ] =>
+      let T' := eval_mapT T in idtac T';
+      let X := fresh in
+      enough (tpm T' phi) as X; [ 
+        eapply Weak; [now apply X | repeat apply mapT_step; apply subset_refl ]
+      |]
+  end.
+
+Ltac fintro_ident x :=
+  let H := fresh "H" in
+  match goal with
+  | [ |- _ ⊢ ∀ ?t ] => 
+    apply AllI;
+    edestruct nameless_equiv_all' as [x H];
+    apply H; clear H;
+    simpl_subst
+  | [ |- @pm _ _ ?p ?C (named_quant All _ ?t) ] =>
+    apply AllI;
+    edestruct nameless_equiv_all' as [x H];
+    apply H; clear H;
+    simpl_subst;
+    match goal with [ |- prv _ ?t'] => change (@pm _ _ p C t') end;
+    update_binder_names
+  | [ |- _ ⊩ ∀ ?t ] =>
+    let E := fresh "E" in
+    apply AllI;
+    assert (exists x, $0 = x) as [x E] by (now exists ($0));
+    rewrite (subst_zero t x E); clear E;
+    simpl_context_mapT;
+    simpl_subst
+  | [ |- @tpm _ _ ?p ?C (named_quant All _ ?t) ] =>
+    let E := fresh "E" in
+    apply AllI;
+    assert (exists x, $0 = x) as [x E] by (now exists ($0));
+    rewrite (subst_zero t x E); clear E;
+    simpl_context_mapT;
+    simpl_subst
+    (* match goal with [ |- tprv ?C' ?t'] => change (@tpm _ _ p C' t') end *)
+    (* update_binder_names *)
+  end.
 
 Ltac fintro_pat' pat :=
   match pat with
@@ -403,79 +617,41 @@ Ltac fintro_pat' pat :=
       ); 
       fintro_pat' p2
   | patAnd ?p1 ?p2 => (* Conjunction *)
-      make_compatible ltac:(fun _ => apply intro_and_destruct);
+      make_compatible ltac:(fun _ => 
+        match goal with 
+        | [ |- prv _ _ ] => apply intro_and_destruct
+        | [ |- tprv _ _ ] => apply intro_and_destruct_T
+        end
+      ); 
       fintro_pat' p1; fintro_pat' p2  
   | patOr ?p1 ?p2 =>
-      make_compatible ltac:(fun _ => apply intro_or_destruct);
+      make_compatible ltac:(fun _ => 
+        match goal with 
+        | [ |- prv _ _ ] => apply intro_or_destruct
+        | [ |- tprv _ _ ] => apply intro_or_destruct_T
+        end
+      );
       [fintro_pat' p1 | fintro_pat' p2]
   | patId ?id =>
       match goal with 
-      | [ |- ?A ⊢ ∀ ?t ] => 
-        let x := fresh "x" in
-        let H := fresh "H" in
-        apply AllI;
-        edestruct nameless_equiv_all' as [x H];
-        apply H;
-        clear H;
-        simpl_subst_goal
+      | [ |- ?A ⊢ ∀ ?t ] => let x := fresh "x" in fintro_ident x
+      | [ |- ?A ⊩ ∀ ?t ] => let x := fresh "x" in fintro_ident x
       | [ |- ?A ⊢ (?s --> ?t) ] => apply II
+      | [ |- ?A ⊩ (?s --> ?t) ] => apply II
       (* Special care for intro in proof mode *)
-      | [ |- pm ?C (∀ ?t) ] => make_compatible ltac:(fun _ => apply AllI)
-      | [ |- @pm _ _ ?p ?C (named_quant All _ ?t) ] =>
-          apply AllI;
-          (* let name := 
-            match id with 
-            | "?" => new_name "x" V
-            | _ => match lookup V id with
-              | @None => id
-              | @Some _ _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 6 msg
-              end
-            end
-          in *)
-          let x := fresh "x" in
-          let H := fresh "H" in
-          edestruct nameless_equiv_all' as [x H];
-          apply H;
-          clear H;
-          simpl_subst_goal;
-          match goal with [ |- @prv _ ?t'] => change (@pm _ _ p C t') end;
-          update_binder_names
-      | [ |- @pm _ _ ?p ?C (?s --> ?t) ] =>
-          apply II;
-          let name := 
-            match id with 
-            | "?" => new_name "H" C
-            | _ => match lookup C id with
-              | @None => id
-              | @Some _ _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 6 msg
-              end
-            end
-          in change (@pm _ _ p (ccons name s C) t)
+      | [ |- @pm _ _ ?p ?C (named_quant All _ ?t) ] => let x := fresh "x" in fintro_ident x
+      | [ |- @tpm _ _ ?p ?C (named_quant All _ ?t) ] => let x := fresh "x" in fintro_ident x
+      | [ |- @pm _ _ ?p ?C (?s --> ?t) ] => apply II; let name := name_from_pattern C id in change (@pm _ _ p (ccons name s C) t)
+      | [ |- @tpm _ _ ?p ?C (?s --> ?t) ] => apply II; let name := name_from_pattern C id in change (@tpm _ _ p (tcons name s C) t)
       end
   end.
+
 Ltac fintro_pat intro_pat := 
   match eval cbn in (parse_intro_pattern intro_pat) with
   | Some ?p => fintro_pat' p
   | None => let msg := eval cbn in ("Invalid intro pattern: " ++ intro_pat) in fail 2 msg
   end.
-Ltac fintro_ident x :=
-  let H := fresh "H" in
-  match goal with
-  | [ |- ?A ⊢ ∀ ?t ] => 
-    apply AllI;
-    edestruct nameless_equiv_all' as [x H];
-    apply H;
-    clear H;
-    simpl_subst_goal
-  | [ |- @pm _ _ ?p ?C (named_quant All _ ?t) ] =>
-    apply AllI;
-    edestruct nameless_equiv_all' as [x H];
-    apply H;
-    clear H;
-    simpl_subst_goal;
-    match goal with [ |- prv _ ?t'] => change (@pm _ _ p C t') end;
-    update_binder_names
-  end.
+
 Tactic Notation "fintro" := fintro_pat constr:("?").
 Tactic Notation "fintro" constr(H) := fintro_pat H.
 Tactic Notation "fintro" ident(x) := fintro_ident x.

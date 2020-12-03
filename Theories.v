@@ -11,7 +11,7 @@ Section Theories.
 Context {Σ_funcs : funcs_signature}.
 Context {Σ_preds : preds_signature}.
 
-Variable p : peirce.
+Context  {p : peirce}.
 
 
 Definition subset_T (T1 T2 : theory) := forall (phi : form), phi ∈ T1 -> phi ∈ T2.
@@ -23,7 +23,7 @@ Infix "⋄" := extend (at level 20).
 Definition mapT (f : form -> form) (T : theory) : theory := fun phi => exists psi, T psi /\ f psi = phi.
 
 
-Theorem Weak_T A B phi :
+Theorem WeakT A B phi :
   A ⊩ phi -> A ⊑ B -> B ⊩ phi.
 Proof.
   intros H. revert B.
@@ -164,13 +164,13 @@ Proof.
   - apply AllI. erewrite map_shift_up_down_eq; auto.
 Qed.
 
-Lemma T_AllE T phi t :
+Lemma T_AllE T t phi :
   (T ⊩ ∀ phi) -> T ⊩ phi[t..].
 Proof.
   intros [A[H1 H2]]. exists A. split. firstorder. now apply AllE.
 Qed.
 
-Lemma T_ExI T phi t :
+Lemma T_ExI T t phi :
   T ⊩ phi[t..] -> T ⊩ ∃ phi.
 Proof.
   intros [A[A1 A2]]. exists A. split. firstorder. now apply ExI with t.
