@@ -1065,24 +1065,24 @@ Proof.
 Qed.
 
 
-Tactic Notation "case" "distinction" constr(phi) "as" constr(H1) constr(H2) := 
+Tactic Notation "fclassical" constr(phi) "as" constr(H1) constr(H2) := 
   make_compatible ltac:(fun _ => 
     match goal with
     | [ |- _ ⊢ _ ] => apply (case_help _ phi)
     | [ |- _ ⊩ _ ] => apply (case_help_T _ phi)
     end
   ); let pat := eval cbn in ("[" ++ H1 ++ "|" ++ H2 ++ "]") in fintro_pat pat.
-Tactic Notation "case" "distinction" constr(phi) "as" constr(H) := case distinction phi as H H.
-Tactic Notation "case" "distinction" constr(phi) := case distinction phi as "".
+Tactic Notation "fclassical" constr(phi) "as" constr(H) := fclassical phi as H H.
+Tactic Notation "fclassical" constr(phi) := fclassical phi as "".
 
-Tactic Notation "contradict" "as" constr(H) := 
+Tactic Notation "fcontradict" "as" constr(H) := 
   make_compatible ltac:(fun _ => 
     match goal with 
     | [ |- _ ⊢ _ ] => apply contradiction_help
     | [ |- _ ⊩ _ ] => apply contradiction_help_T
     end
   ); fintro_pat H.
-Tactic Notation "contradict" := contradict as "?".
+Tactic Notation "fcontradict" := fcontradict as "?".
 
 
 
@@ -1407,7 +1407,7 @@ Section FullLogic.
   (* Classical logic *)
   Goal forall phi, [] ⊢C (phi ∨ (phi --> ⊥)).
   Proof.
-    intro. fstart. case distinction phi.
+    intro. fstart. fclassical phi.
     - fleft. fapply "H".
     - fright. fapply "H".
   Qed.
