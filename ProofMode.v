@@ -443,6 +443,43 @@ Tactic Notation "simpl_subst" hyp(H) := (simpl_subst_hyp H).
 Tactic Notation "simpl_subst" := (simpl_subst_goal).
 
 
+(* Return the context of the goal or a hypothesis *)
+Ltac get_context_goal :=
+  match goal with
+  | [ |- ?C ⊢ _ ] => C
+  | [ |- ?C ⊩ _ ] => C
+  | [ |- pm ?C _ ] => C
+  | [ |- tpm ?C _ ] => C
+  end.
+Ltac get_context_hyp H :=
+  match type of H with
+  | ?C ⊢ _ => C
+  | ?C ⊩ _ => C
+  | pm ?C _ => C
+  | tpm ?C _ => C
+  end.
+Tactic Notation "get_context" := get_context_goal.
+Tactic Notation "get_context" hyp(H) := get_context_hyp H.
+
+
+(* Return the formula inside the goal or a hypothesis *)
+Ltac get_form_goal :=
+  match goal with
+  | [ |- _ ⊢ ?phi ] => phi
+  | [ |- _ ⊩ ?phi ] => phi
+  | [ |- pm _ ?phi ] => phi
+  | [ |- tpm _ ?phi ] => phi
+  end.
+Ltac get_form_hyp H :=
+  match type of H with
+  | _ ⊢ ?phi => phi
+  | _ ⊩ ?phi => phi
+  | pm _ ?phi => phi
+  | tpm _ ?phi => phi
+  end.
+Tactic Notation "get_form" := get_form_goal.
+Tactic Notation "get_form" hyp(H) := get_form_hyp H.
+
 
 
 
@@ -599,9 +636,8 @@ Ltac fintro_ident x :=
     assert (exists x, $0 = x) as [x E] by (now exists ($0));
     rewrite (subst_zero t x E); clear E;
     simpl_context_mapT;
-    simpl_subst
-    (* match goal with [ |- tprv ?C' ?t'] => change (@tpm _ _ p C' t') end *)
-    (* update_binder_names *)
+    simpl_subst;
+    update_binder_names
   end.
 
 Ltac fintro_pat' pat :=
@@ -679,26 +715,6 @@ Tactic Notation "fintros" ident(H1) ident(H2) ident(H3) := fintro_ident H1; fint
 
 
 (* 
- * [ctx2hyp n as H]
- *
- * Lifts the n'th assumption in the ND context to a Coq hypothesis.
- *)
-Ltac ctx2hyp'' n H A := fun _ => 
-  match n with
-  | 0 => match A with ?t::_ => assert ([t] ⊢ t) as H by ctx end
-  | S ?n' => match A with _::?A' => ctx2hyp'' n' H A' end
-  end.
-
-Ltac ctx2hyp' n H := fun _ => 
-  match goal with [ |- ?A ⊢ _ ] => ctx2hyp'' n H A end.
-
-Tactic Notation "ctx2hyp" integer(n) "as" reference(H) := make_compatible ltac:(fun _ => ctx2hyp' n H).
-
-
-
-
-
-(* 
  * [fspecialize (H x1 x2 ... xn)], [fspecialize H with x1 x2 ... xn] 
  * 
  * Specializes a Coq hypothesis `H` of the form `X ⊢ ∀∀...∀ p1 --> ... --> pn --> g`
@@ -748,13 +764,20 @@ Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) constr(x3) := 
  * each premise `p1, p2, ..., pn`. *)
 Ltac fapply_without_quant H :=
   tryif exact H then idtac else
+  let Hs := fresh "Hs" in 
+  let Ht := fresh "Ht" in 
   match type of H with
   | ?A ⊢ (?s --> ?t) => 
-    let Hs := fresh "Hs" in 
-    let Ht := fresh "Ht" in 
     match goal with [ |- @prv _ _ ?p _ _ ] =>
       enough (@prv _ _ p A s) as Hs; 
       [ assert (@prv _ _ p A t) as Ht; 
+        [ apply (IE _ _ _ H Hs) | fapply_without_quant Ht; clear Hs; clear Ht ] 
+      | ]
+    end
+  | ?A ⊩ (?s --> ?t) => 
+    match goal with [ |- @tprv _ _ ?p _ _ ] =>
+      enough (@tprv _ _ p A s) as Hs; 
+      [ assert (@tprv _ _ p A t) as Ht; 
         [ apply (IE _ _ _ H Hs) | fapply_without_quant Ht; clear Hs; clear Ht ] 
       | ]
     end
@@ -768,15 +791,25 @@ Tactic Notation "is_hyp" hyp(H) := idtac.
 Ltac turn_into_hypothesis T H contxt := 
   tryif is_hyp T
   then assert (H := T)  (* Hypothesis *)
-  else match goal with [ |- @prv _ _ ?p ?C _ ] => 
-    match type of T with
-    | form => assert (@prv _ _ p C T) as H by ctx  (* Explicit form *)
-    | nat => let T' := nth C T in assert (@prv _ _ p C T') as H by ctx  (* Idx in context *)
-    | string => match lookup contxt T with  (* Context name *)
-      | @None => let msg := eval cbn in ("Unknown identifier: " ++ T) in fail 4 msg
-      | @Some _ ?n => let T' := nth C n in assert (@prv _ _ p C T') as H by ctx
+  else match goal with 
+  | [ |- @prv _ _ ?p ?C _ ] => 
+      match type of T with
+      | form => assert (@prv _ _ p C T) as H by ctx  (* Explicit form *)
+      | nat => let T' := nth C T in assert (@prv _ _ p C T') as H by ctx  (* Idx in context *)
+      | string => match lookup contxt T with  (* Context name *)
+        | @None => let msg := eval cbn in ("Unknown identifier: " ++ T) in fail 4 msg
+        | @Some _ ?n => let T' := nth C n in assert (@prv _ _ p C T') as H by ctx
+        end
       end
-    end
+  | [ |- @tprv _ _ ?p ?C _ ] => 
+      match type of T with
+      | form => assert (@tprv _ _ p C T) as H by ctx  (* Explicit form *)
+      | nat => let T' := nth C T in assert (@tprv _ _ p C T') as H by ctx  (* Idx in context *)
+      | string => match lookup contxt T with  (* Context name *)
+        | @None => let msg := eval cbn in ("Unknown identifier: " ++ T) in fail 4 msg
+        | @Some _ ?n => let T' := nth C n in assert (@tprv _ _ p C T') as H by ctx
+        end
+      end
   end.
 
 (* If `H` has the type `P1 -> P2 -> ... -> Pn -> (A ⊢ ϕ)`, this
@@ -784,7 +817,9 @@ Ltac turn_into_hypothesis T H contxt :=
 Ltac assert_premises H :=
   match type of H with
   | _ ⊢ _ => idtac
-  | pm _ _ _ => idtac
+  | _ ⊩ _ => idtac
+  | pm _ _ => idtac
+  | tpm _ _ => idtac
   | ?A -> ?B => 
       let H' := fresh "H" in assert A as H';
       [|specialize (H H'); clear H'; assert_premises H ]
@@ -796,22 +831,18 @@ Ltac feapply' T A := fun contxt =>
   (* If `H` containes has further Coq premises before the formula 
    * statement, we add them as additional goals. *)
   assert_premises H;
-  (* Match on the goal, so that we don't try to apply to these
-   * additional goals. *)
-  match goal with
-  | [ |- _ ⊢ _ ] =>
+  (* Only try here, because it would fail on these additional goals. *)
+  try (
     fspecialize_list H A;
     instantiate_evars H;
     simpl_subst H;
-    match goal with [ |- ?C ⊢ _ ] => 
-      eapply (Weak _ C) in H; [| firstorder]
-    end;
+    let C := get_context_goal in 
+    eapply (Weak _ C) in H; [| firstorder];
     fapply_without_quant H; 
     (* [fapply_without_quant] creates the subgoals in the wrong order.
      * Reverse them to to get the right order: *)
     revgoals
-  | [ |- _ ] => idtac
-  end;
+  );
   clear H.
 
 Ltac fapply' T A contxt :=
@@ -819,17 +850,14 @@ Ltac fapply' T A contxt :=
   turn_into_hypothesis T H contxt;
   (* If `H` containes has further Coq premises before the formula 
    * statement, we add them as additional goals. *)
-   assert_premises H;
-   (* Match on the goal, so that we don't try to apply to these
-    * additional goals. *)
-   match goal with
-   | [ |- _ ⊢ _ ] =>
+  assert_premises H;
+  (* Only try here, because it would fail on these additional goals. *)
+  try (
     fspecialize_list H A; 
     instantiate_evars H; 
     simpl_subst H;
-    match goal with [ |- ?U ⊢ _ ] => 
-      eapply (Weak _ U) in H; [| firstorder]
-    end;
+    let C := get_context_goal in 
+    eapply (Weak _ C) in H; [| firstorder];
     fapply_without_quant H;
     (* [fapply_without_quant] creates the subgoals in the wrong order.
      * Reverse them to to get the right order: *)
@@ -841,8 +869,7 @@ Ltac fapply' T A contxt :=
     tryif has_evar ltac:(type of H) 
     then fail 3 "Cannot find instance for variable. Try feapply?" 
     else clear H
-  | [ |- _ ] => idtac
-  end;
+  );
   try clear H.
 
 
@@ -872,16 +899,22 @@ Proof.
 Qed.
 
 Ltac fassert' phi := fun _ =>
-match goal with
-| [ |- ?A ⊢ ?psi ] =>
   let H1 := fresh "H" in
   let H2 := fresh "H" in
-  assert (A ⊢ phi) as H1; [ | 
-    assert (A ⊢ (phi --> psi)); [ clear H1 |
-      apply (fassert_help A phi psi H1 H2)
+  match goal with
+  | [ |- ?A ⊢ ?psi ] =>
+    assert (A ⊢ phi) as H1; [ | 
+      assert (A ⊢ (phi --> psi)); [ clear H1 |
+        apply (fassert_help A phi psi H1 H2)
+      ]
     ]
-  ]
-end.
+  | [ |- ?A ⊩ ?psi ] =>
+    assert (A ⊩ phi) as H1; [ | 
+      assert (A ⊩ (phi --> psi)); [ clear H1 |
+        apply (fassert_help A phi psi H1 H2)
+      ]
+    ]
+  end.
 
 Tactic Notation "fassert" constr(phi) := (make_compatible ltac:(fassert' phi)); [| fintro].
 Tactic Notation "fassert" constr(phi) "as" constr(H) := (make_compatible ltac:(fassert' phi)); [| fintro_pat H].
@@ -903,21 +936,28 @@ Tactic Notation "fassert" constr(phi) "as" constr(H) "by" tactic(tac) := (make_c
 
 Ltac fdestruct' n pat :=
   match n with
-  | 0 => 
-      match goal with 
-      | [ |- prv _ _ ] => apply -> switch_imp; fintro_pat' pat
-      | [ |- pm (ccons _ ?t ?C) ?phi ] =>
-          apply -> switch_imp; change (pm C (t --> phi)); fintro_pat' pat
-      end
+  | 0 =>  
+    match goal with 
+    | [ |- prv _ _ ] => apply -> switch_imp; fintro_pat' pat
+    | [ |- tprv _ _ ] => apply -> switch_imp_T; fintro_pat' pat
+    | [ |- pm (ccons _ ?t ?C) ?phi ] => apply -> switch_imp; change (pm C (t --> phi)); fintro_pat' pat
+    | [ |- tpm (tcons _ ?t ?C) ?phi ] => apply -> switch_imp_T; change (tpm C (t --> phi)); fintro_pat' pat
+    end
   | S ?n' =>
-      match goal with 
-      | [ |- prv _ _ ] => apply -> switch_imp; fdestruct' n' pat; apply <- switch_imp
-      | [ |- pm  (ccons ?a ?t ?C) ?phi ] => 
-          apply -> switch_imp; change (pm C (t --> phi)); fdestruct' n' pat;
-          match goal with [ |- pm ?C' (t --> phi) ] => 
-            apply <- switch_imp; change (pm (ccons a t C') phi)
-          end
-      end
+    match goal with 
+    | [ |- prv _ _ ] => apply -> switch_imp; fdestruct' n' pat; apply <- switch_imp
+    | [ |- tprv _ _ ] => apply -> switch_imp_T; fdestruct' n' pat; apply <- switch_imp_T
+    | [ |- pm  (ccons ?a ?t ?C) ?phi ] => 
+        apply -> switch_imp; change (pm C (t --> phi)); fdestruct' n' pat;
+        match goal with [ |- pm ?C' (t --> phi) ] => 
+          apply <- switch_imp; change (pm (ccons a t C') phi)
+        end
+    | [ |- tpm (tcons ?a ?t ?C) ?phi ] => 
+        apply -> switch_imp_T; change (tpm C (t --> phi)); fdestruct' n' pat;
+        match goal with [ |- tpm ?C' (t --> phi) ] => 
+          apply <- switch_imp_T; change (tpm (tcons a t C') phi)
+        end
+    end
   end.
 
 Ltac create_pattern T :=
@@ -938,36 +978,28 @@ Ltac fdestruct'' T pat :=
     let H := fresh "H" in
     let X := fresh "X" in
     assert (H := T);
+    let s := get_form_hyp H in
     match goal with
-    | [ |- prv ?A ?t ] => 
-        match type of H with 
-        | prv _ ?s => enough (A ⊢ (s --> t)) as X by (feapply X; feapply H)
-        | pm _ _ ?s => enough (A ⊢ (s --> t)) as X by (feapply X; feapply H)
-        end
-    | [ |- pm ?A ?t ] =>
-        match type of H with 
-        | prv _ ?s => enough (pm A (s --> t)) as X by (feapply X; feapply H)
-        | pm _ ?s => enough (pm A (s --> t)) as X by (feapply X; feapply H)
-        end
+    | [ |- prv ?A ?t ] => enough (A ⊢ (s --> t)) as X by (feapply X; feapply H)
+    | [ |- tprv ?A ?t ] => enough (A ⊩ (s --> t)) as X by (feapply X; feapply H)
+    | [ |- pm ?A ?t ] => enough (pm A (s --> t)) as X by (feapply X; feapply H)
+    | [ |- tpm ?A ?t ] => enough (tpm A (s --> t)) as X by (feapply X; feapply H)
     end;
     fintro "?"; fdestruct'' 0 pat; clear H
   )
   else (
     let n := match type of T with 
       | nat => T 
-      | string => match goal with [ |- pm ?C _ ] => 
+      | string =>
+        let C := get_context_goal in
         match lookup C T with 
         | @Some _ ?n' => n'
         | @None => let msg := eval cbn in ("Unknown identifier: " ++ T) in fail 3 msg
         end
       end
-    end in
+    in
     let pattern := lazymatch pat with
-      | "" => 
-        match goal with 
-        | [ |- prv ?A _ ] => let t := nth A n in create_pattern t 
-        | [ |- pm ?C _ ] => let t := nth C n in create_pattern t 
-        end
+      | "" => let C := get_context_goal in let t := nth C n in create_pattern t
       | _ => 
         match eval cbn in (parse_intro_pattern pat) with 
         | @Some _ ?p => p
@@ -993,6 +1025,16 @@ Proof.
   apply DI1. apply Ctx. now left.
 Qed.
 
+Lemma case_help_T `{p : peirce} A phi psi :
+  A ⊩C (phi ∨ (phi --> ⊥) --> psi) -> A ⊩C psi.
+Proof.
+  intro H. eapply IE. apply H.
+  eapply IE. eapply Pc.
+  apply II. apply DI2. apply II.
+  eapply IE. apply Ctx. firstorder.
+  apply DI1. apply Ctx. firstorder.
+Qed.
+
 Lemma contradiction_help `{p : peirce} A phi :
   A ⊢C ((phi --> ⊥) --> ⊥) -> A ⊢C phi.
 Proof.
@@ -1002,14 +1044,33 @@ Proof.
   apply Ctx. now left.
 Qed.
 
+Lemma contradiction_help_T `{p : peirce} A phi :
+  A ⊩C ((phi --> ⊥) --> ⊥) -> A ⊩C phi.
+Proof.
+  intro H. eapply IE. eapply Pc. apply II.
+  apply Exp. eapply IE. eapply Weak. apply H. firstorder.
+  apply II. eapply IE. apply Ctx. firstorder.
+  apply Ctx. firstorder.
+Qed.
+
 
 Tactic Notation "case" "distinction" constr(phi) "as" constr(H1) constr(H2) := 
-  make_compatible ltac:(fun _ => apply (case_help _ phi)); 
-  let pat := eval cbn in ("[" ++ H1 ++ "|" ++ H2 ++ "]") in fintro_pat pat.
+  make_compatible ltac:(fun _ => 
+    match goal with
+    | [ |- _ ⊢ _ ] => apply (case_help _ phi)
+    | [ |- _ ⊩ _ ] => apply (case_help_T _ phi)
+    end
+  ); let pat := eval cbn in ("[" ++ H1 ++ "|" ++ H2 ++ "]") in fintro_pat pat.
 Tactic Notation "case" "distinction" constr(phi) "as" constr(H) := case distinction phi as H H.
 Tactic Notation "case" "distinction" constr(phi) := case distinction phi as "".
 
-Tactic Notation "contradict" "as" constr(H) := make_compatible ltac:(fun _ => apply contradiction_help); fintro_pat H.
+Tactic Notation "contradict" "as" constr(H) := 
+  make_compatible ltac:(fun _ => 
+    match goal with 
+    | [ |- _ ⊢ _ ] => apply contradiction_help
+    | [ |- _ ⊩ _ ] => apply contradiction_help_T
+    end
+  ); fintro_pat H.
 Tactic Notation "contradict" := contradict as "?".
 
 
@@ -1108,6 +1169,10 @@ Section FullLogic.
         (* ? *)
   Admitted.
 
+  Lemma leibniz_T T phi t t' :
+    FA ⊏ T -> T ⊩ (t == t') -> T ⊩ phi[t..] -> T ⊩ phi[t'..].
+  Proof.
+  Admitted.
 
 
 
@@ -1167,41 +1232,45 @@ Section FullLogic.
     fspecialize_list H A; 
     instantiate_evars H; 
     simpl_subst H;
-    match type of H with _ ⊢ (?_t == ?_t') =>
+    match get_form_hyp H with (?_t == ?_t') =>
       let t := match back with true => _t' | false => _t end in
       let t' := match back with true => _t | false => _t' end in
 
       (* 1. Replace each occurence of `t` with `($n)[up_n n t..]` and every
        *  other `s` with `s[up_n n ↑][up_n n t..]`. The new formula is 
        *  created with the [add_shifts] tactic and proven in place. *)
-      match goal with [ |- ?C ⊢ ?G ] => 
-        let X := fresh in 
-        let G' := add_shifts t G in
-        enough (C ⊢ G') as X;
-        [
-          repeat match type of X with context K[ ?u[up_n ?n ↑][up_n ?n t..] ] =>
-            let R := fresh in
-            (* TODO: Prove general lemma for this: *)
-            assert (u[up_n n ↑][up_n n t..] = u) as R; [
-              rewrite subst_term_comp; apply subst_term_id; 
-              let a := fresh in intros a;
-              (do 10 try destruct a); reflexivity |];
-            rewrite R in X
-          end;
-          apply X
-        |]
-      end;
+      let C := get_context_goal in
+      let G := get_form_goal in
+      let X := fresh in 
+      let G' := add_shifts t G in
+      enough (C ⊢ G') as X;
+      [
+        repeat match type of X with context K[ ?u[up_n ?n ↑][up_n ?n t..] ] =>
+          let R := fresh in
+          (* TODO: Prove general lemma for this: *)
+          assert (u[up_n n ↑][up_n n t..] = u) as R; [
+            rewrite subst_term_comp; apply subst_term_id; 
+            let a := fresh in intros a;
+            (do 10 try destruct a); reflexivity |];
+          rewrite R in X
+        end;
+        apply X
+      |];
 
       (* 2. Pull out the [t..] substitution *)
-      match goal with [ |- ?U ⊢ ?G ] =>
-        let G' := remove_shifts G t in change (U ⊢ G'[t..])
+      match goal with 
+      | [ |- ?U ⊢ ?G ] => let G' := remove_shifts G t in change (U ⊢ G'[t..])
+      | [ |- ?U ⊩ ?G ] => let G' := remove_shifts G t in change (U ⊩ G'[t..])
       end;
       
       (* 3. Change [t..] to [t'..] using leibniz. For some reason
        *  we cannot directly [apply leibniz with (t := t')] if t'
        *  contains ⊕, σ, etc. But evar seems to work. *)
       let t'' := fresh "t" in 
-      eapply (leibniz _ _ ?[t'']);
+      match goal with
+      | [ |- _ ⊢ _ ] => eapply (leibniz _ _ ?[t''])
+      | [ |- _ ⊩ _ ] => eapply (leibniz_T _ _ ?[t''])
+      end;
       [ instantiate (t'' := t'); firstorder |
         match back with
         | false => feapply ax_sym; fapply H

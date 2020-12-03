@@ -264,4 +264,15 @@ Proof.
 Qed.
 
 
+
+
+Lemma switch_imp_T T alpha phi : T ⊩ (alpha --> phi) <-> (T ⋄ alpha) ⊩ phi.
+Proof.
+  split.
+  - intros H. eapply T_IE. 2: apply T_Ctx. eapply WeakT.
+    exact H. all : firstorder.
+  - apply T_II.
+Qed.
+
+
 End Theories.
