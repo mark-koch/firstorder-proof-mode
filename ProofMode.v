@@ -34,7 +34,7 @@ Definition ccons (s : string) phi C := @cons form phi C.
 (* Special alias for unknown lists. Only used to indent with one space in Notation *)
 Definition cblackbox (A : list form) := A.
 
-Definition tnil :theory := fun _ => False.
+Definition tnil : theory := fun _ => False.
 Definition tcons (s : string) phi (T : theory) : theory := extend T phi.
 (* Special alias for unknown theories. Only used to indent with one space in Notation *)
 Definition tblackbox (T : theory) := T.
@@ -158,8 +158,8 @@ Ltac lookup := lookup' 0.
 
 Ltac nth A n :=
   match n with
-  | 0 => match A with ?t :: _ => t | ccons _ ?t _ => t | tcons _ ?t _ => t end
-  | S ?n' => match A with _ :: ?A' => nth A' n' | ccons _ _ ?A' => nth A' n' | tcons _ _ ?T' => nth T' n' end
+  | 0 => match A with ?t :: _ => t | extend _ ?t => t | ccons _ ?t _ => t | tcons _ ?t _ => t end
+  | S ?n' => match A with _ :: ?A' => nth A' n' | extend ?A' _ => nth A' n' | ccons _ _ ?A' => nth A' n' | tcons _ _ ?T' => nth T' n' end
   end.
 
 Ltac map_ltac A f :=
@@ -168,11 +168,11 @@ Ltac map_ltac A f :=
   | cnil => cnil
   | tnil => tnil
   | @Vector.nil ?a => constr:(@Vector.nil a)
-  | cblackbox ?A => constr:(cblackbox A)
-  | tblackbox ?A => constr:(tblackbox A)
+  | cblackbox ?A' => A
+  | tblackbox ?A' => A
   | cons ?x ?A' => let x' := f x in let A'' := map_ltac A' f in constr:(cons x' A'')
   | ccons ?s ?x ?A' => let x' := f x in let A'' := map_ltac A' f in constr:(ccons s x' A'')
-  | tcons ?s ?x ?A' => let x' := f x in let A'' := map_ltac A' f in constr:(ccons s x' A'')
+  | tcons ?s ?x ?A' => let x' := f x in let A'' := map_ltac A' f in constr:(tcons s x' A'')
   | Vector.cons ?x ?A' => let x' := f x in let A'' := map_ltac A' f in constr:(Vector.cons x' A'')
   end.
 
@@ -210,12 +210,13 @@ Ltac create_context' A :=
       end
     end
   | nil => constr:((cnil, 0))
-  | ?A' => 
+  | _ => 
     (* If it's not a cons or nil, it's a variable/function call/... 
      * and we don't want to look into it *)
     match type of A with
-    | list form => constr:((cblackbox A', 0))
-    | theory => constr:((tblackbox A', 0))
+    | list form => constr:((cblackbox A, 0))
+    | theory => constr:((tblackbox A, 0))
+    | form -> Prop => constr:((tblackbox A, 0))
     end
   end.
 Ltac create_context A := let x := create_context' A in match x with (?c, _) => c end.
@@ -261,13 +262,13 @@ Ltac annotate_form' f idx phi :=
 
 Ltac add_binder_names :=
   match goal with 
-  | [ |- @pm _ _ ?p ?C ?phi] =>
+  | [ |- @pm _ _ ?p ?C ?phi ] =>
     let f := constr:(fun (n : nat) => "ERROR") in
     let annotate_form := annotate_form' f 0 in
     let phi' := annotate_form phi in
     let C' := map_ltac C annotate_form in
     change (@pm _ _ p C' phi')
-  | [ |- @tpm _ _ ?p ?C ?phi] =>
+  | [ |- @tpm _ _ ?p ?C ?phi ] =>
     let f := constr:(fun (n : nat) => "ERROR") in
     let annotate_form := annotate_form' f 0 in
     let phi' := annotate_form phi in
@@ -420,6 +421,8 @@ Ltac simpl_subst_hyp H :=
   end;
   try rewrite !up_term in H;
   try rewrite !subst_term_shift in H;
+  (* Turn `(S >> var) 4` into `$5`. TODO: Find a better way to do this. *)
+  unfold ">>";
   (* Domain specific simplifications: *)
   try fold zero in H.
 
@@ -436,6 +439,8 @@ Ltac simpl_subst_goal :=
   end;
   try rewrite !up_term;
   try rewrite !subst_term_shift;
+  (* Turn `(S >> var) 4` into `$5`. TODO: Find a better way to do this. *)
+  unfold ">>";
   (* Domain specific simplifications: *)
   try fold zero.
 
@@ -586,7 +591,7 @@ Ltac eval_mapT M :=
   match M with
   | mapT ?f (extend ?T ?a) => let T' := eval_mapT (mapT f T) in constr:(extend T' (f a))
   | mapT ?f (tcons ?s ?a ?T) => let T' := eval_mapT (mapT f T) in constr:(tcons s (f a) T')
-  | mapT ?f (tblackbox ?T) => constr:(tblackbox (mapT f ?T))
+  | mapT ?f (tblackbox ?T) => constr:(tblackbox (mapT f T))
   | _ => M
   end.
 
@@ -601,7 +606,7 @@ Ltac simpl_context_mapT :=
         eapply Weak; [now apply X | repeat apply mapT_step; apply subset_refl ]
       |]
   | [ |- tpm ?T ?phi ] =>
-      let T' := eval_mapT T in idtac T';
+      let T' := eval_mapT T in
       let X := fresh in
       enough (tpm T' phi) as X; [ 
         eapply Weak; [now apply X | repeat apply mapT_step; apply subset_refl ]
@@ -898,6 +903,12 @@ Proof.
   intros H1 H2. eapply IE. exact H2. exact H1.
 Qed.
 
+Lemma fassert_help_T `{peirce} A phi psi :
+  A ⊩ phi -> A ⊩ (phi --> psi) -> A ⊩ psi.
+Proof.
+  intros H1 H2. eapply IE. exact H2. exact H1.
+Qed.
+
 Ltac fassert' phi := fun _ =>
   let H1 := fresh "H" in
   let H2 := fresh "H" in
@@ -911,7 +922,7 @@ Ltac fassert' phi := fun _ =>
   | [ |- ?A ⊩ ?psi ] =>
     assert (A ⊩ phi) as H1; [ | 
       assert (A ⊩ (phi --> psi)); [ clear H1 |
-        apply (fassert_help A phi psi H1 H2)
+        apply (fassert_help_T A phi psi H1 H2)
       ]
     ]
   end.
@@ -1243,7 +1254,10 @@ Section FullLogic.
       let G := get_form_goal in
       let X := fresh in 
       let G' := add_shifts t G in
-      enough (C ⊢ G') as X;
+      match goal with
+      | [ |- _ ⊢ _ ] => enough (C ⊢ G') as X
+      | [ |- _ ⊩ _ ] => enough (C ⊩ G') as X
+      end;
       [
         repeat match type of X with context K[ ?u[up_n ?n ↑][up_n ?n t..] ] =>
           let R := fresh in
@@ -1380,8 +1394,7 @@ Section FullLogic.
     intros. frewrite <- H. 
   Abort.
 
-  Lemma test : string -> term.
-  intro. exact ($0). Qed.
+
 
   (* Variable names instead of de Bruijn: *)
   Goal FA ⊢ ∀ ∀ $1 == $0 --> σ $1 == zero ⊕ σ $0.
@@ -1403,6 +1416,37 @@ Section FullLogic.
   Proof.
     intro. fstart. fintros. contradict as "X". fapply "H". fapply "X".
   Qed.
+
+
+
+  (* Theories *)
+  Definition TFA phi := phi el FA.
+
+  Lemma num_add_homomorphism_T x y :
+    TFA ⊩ (num x ⊕ num y == num (x + y)).
+  Proof.
+    induction x; cbn.
+    - fapply ax_add_zero.
+    - fstart. frewrite <- IHx. fapply ax_add_rec.
+  Qed.
+
+  Definition TFA_ind : theory := fun phi => phi el FA \/ exists psi, phi = PA_induction psi.
+
+  Lemma add_zero_right :
+    TFA_ind ⊩ ∀ $0 ⊕ zero == $0.
+  Proof.
+    fstart. assert (TFA_ind ⊩ PA_induction ($0 ⊕ zero == $0)) as H.
+    { apply Ctx. right. now eexists. }
+    unfold PA_induction in H. fapply H; clear H.
+    - fapply ax_add_zero.
+    - fassert ax_trans as "trans". ctx.
+      fassert ax_add_rec as "add_rec". ctx.
+      fassert ax_eq_succ as "eq_succ". ctx.
+      fintros x "IH". feapply "trans".
+      + fapply "add_rec".
+      + fapply "eq_succ". fapply "IH".
+  Qed.
+
 
 
 
