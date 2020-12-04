@@ -2,7 +2,6 @@ Require Import FOL.
 Require Import Deduction.
 Require Import Tarski.
 Require Import VectorTech.
-Require Import PA.
 Require Import Theories.
 Require Import List.
 Require Import Lia.
@@ -29,6 +28,11 @@ Arguments pm {_} {_} {_} _ _.
 Definition tpm {p cf cp} C phi := @tprv p cf cp C phi.
 Arguments tpm {_} {_} {_} _ _.
 
+Section PM.
+
+Context {Σ_funcs : funcs_signature}.
+Context {Σ_preds : preds_signature}.
+
 Definition cnil := @nil form.
 Definition ccons (s : string) phi C := @cons form phi C.
 (* Special alias for unknown lists. Only used to indent with one space in Notation *)
@@ -39,11 +43,26 @@ Definition tcons (s : string) phi (T : theory) : theory := extend T phi.
 (* Special alias for unknown theories. Only used to indent with one space in Notation *)
 Definition tblackbox (T : theory) := T.
 
+End PM.
+
+
+(* Dummy tactic the end user *must* override if defined
+ * terms like `zero` are used. *)
+Ltac custom_fold := idtac.
+
+(* Dummy tactic the end user *must* override if defined
+ * terms like `zero` are used. *)
+ Ltac custom_unfold := idtac.
+
+(* Dummy tactic the end user can override to add domain
+ * specific simplifications. *)
+Ltac custom_simpl := idtac.
+
 
 
 (** Overload deduction rules to also work for theories: *)
 
-Class DeductionRules (context : Type) (ent : context -> form -> Type) (cons : form -> context -> context) (map : (form -> form) -> context -> context) (In : form -> context -> Prop) :=
+Class DeductionRules `{funcs_signature, preds_signature} (context : Type) (ent : context -> form -> Type) (cons : form -> context -> context) (map : (form -> form) -> context -> context) (In : form -> context -> Prop) :=
 {
   II A phi psi : ent (cons phi A) psi -> ent A (phi --> psi) ;
   IE A phi psi : ent A (phi --> psi) -> ent A phi -> ent A  psi ;
@@ -61,17 +80,17 @@ Class DeductionRules (context : Type) (ent : context -> form -> Type) (cons : fo
   DE A phi psi theta : ent A (phi ∨ psi) -> ent (cons phi A) theta -> ent (cons psi A) theta -> ent A theta ;
 }.
 
-Class ClassicalDeductionRules (context : Type) (ent : context -> form -> Type) :=
+Class ClassicalDeductionRules `{funcs_signature, preds_signature} (context : Type) (ent : context -> form -> Type) :=
 {
   Pc A phi psi : ent A (((phi --> psi) --> phi) --> phi)
 }.
 
-Class WeakClass (context : Type) (ent : context -> form -> Type) (incl : context -> context -> Prop) :=
+Class WeakClass `{funcs_signature, preds_signature} (context : Type) (ent : context -> form -> Type) (incl : context -> context -> Prop) :=
 {
   Weak A B phi : ent A phi -> incl A B -> ent B phi
 }.
 
-Instance prv_DeductionRules `{peirce} : DeductionRules (list form) prv cons (@List.map form form) (@In form) := 
+Instance prv_DeductionRules `{funcs_signature, preds_signature, peirce} : DeductionRules (list form) prv cons (@List.map form form) (@In form) := 
 {| 
   II := Deduction.II ;
   IE := Deduction.IE ;
@@ -89,17 +108,17 @@ Instance prv_DeductionRules `{peirce} : DeductionRules (list form) prv cons (@Li
   DE := Deduction.DE ;
 |}.
 
-Instance prv_ClassicalDeductionRules : ClassicalDeductionRules (list form) (@prv _ _ class) := 
+Instance prv_ClassicalDeductionRules `{funcs_signature, preds_signature} : ClassicalDeductionRules (list form) (@prv _ _ class) := 
 {| 
   Pc := Deduction.Pc
 |}.
 
-Instance prv_WeakClass `{peirce} : WeakClass (list form) prv (@List.incl form) := 
+Instance prv_WeakClass `{funcs_signature, preds_signature, peirce} : WeakClass (list form) prv (@List.incl form) := 
 {| 
   Weak := Deduction.Weak
 |}.
 
-Instance tprv_DeductionRules `{peirce} : DeductionRules theory tprv (fun a b => extend b a) mapT (fun a b => in_theory b a) := 
+Instance tprv_DeductionRules `{funcs_signature, preds_signature, peirce} : DeductionRules theory tprv (fun a b => extend b a) mapT (fun a b => in_theory b a) := 
 {| 
   II := Theories.T_II ;
   IE := Theories.T_IE ;
@@ -117,12 +136,12 @@ Instance tprv_DeductionRules `{peirce} : DeductionRules theory tprv (fun a b => 
   DE := Theories.T_DE ;
 |}.
 
-Instance tprv_ClassicalDeductionRules : ClassicalDeductionRules theory (@tprv _ _ class) := 
+Instance tprv_ClassicalDeductionRules `{funcs_signature, preds_signature} : ClassicalDeductionRules theory (@tprv _ _ class) := 
 {| 
   Pc := Theories.T_Pc
 |}.
 
-Instance tprv_WeakClass `{peirce} : WeakClass theory tprv subset_T := 
+Instance tprv_WeakClass `{funcs_signature, preds_signature, peirce} : WeakClass theory tprv subset_T := 
 {| 
   Weak := Theories.WeakT
 |}.
@@ -164,9 +183,9 @@ Ltac nth A n :=
 
 Ltac map_ltac A f :=
   match A with
-  | nil => nil
-  | cnil => cnil
-  | tnil => tnil
+  | nil => constr:(nil)
+  | cnil => constr:(cnil)
+  | tnil => constr:(tnil)
   | @Vector.nil ?a => constr:(@Vector.nil a)
   | cblackbox ?A' => A
   | tblackbox ?A' => A
@@ -410,39 +429,41 @@ End IntroPattern.
 (* Spimplify terms that occur during specialization *)
 Ltac simpl_subst_hyp H :=
   cbn in H;
-  repeat match type of H with
+  (* repeat match type of H with
   | context C[subst_term ?s ?t] => let H' := context C[t[s]] in change H' in H
   end;
   repeat match type of H with
   | context C[subst_form ?s ?t] => let H' := context C[t[s]] in change H' in H
-  end;
+  end; *)
   repeat match type of H with
-  | context C[?t[S >> var]] => let H' := context C[t[↑]] in change H' in H
+  | context C[S >> var] => let H' := context C[↑] in change H' in H
   end;
   try rewrite !up_term in H;
   try rewrite !subst_term_shift in H;
   (* Turn `(S >> var) 4` into `$5`. TODO: Find a better way to do this. *)
   unfold ">>";
   (* Domain specific simplifications: *)
-  try fold zero in H.
+  custom_fold;
+  custom_simpl.
 
 Ltac simpl_subst_goal :=
   cbn;
-  repeat match goal with
+  (* repeat match goal with
   | [ |- context C[subst_term ?s ?t] ] => let G := context C[t[s]] in change G
   end;
   repeat match goal with
   | [ |- context C[subst_form ?s ?t] ] => let G := context C[t[s]] in change G
-  end;
+  end; *)
   repeat match goal with
-  | [ |- context C[?t[S >> var]] ] => let G := context C[t[↑]] in change G
+  | [ |- context C[S >> var] ] => let G := context C[↑] in change G
   end;
   try rewrite !up_term;
   try rewrite !subst_term_shift;
   (* Turn `(S >> var) 4` into `$5`. TODO: Find a better way to do this. *)
   unfold ">>";
   (* Domain specific simplifications: *)
-  try fold zero.
+  custom_fold;
+  custom_simpl.
 
 Tactic Notation "simpl_subst" hyp(H) := (simpl_subst_hyp H).
 Tactic Notation "simpl_subst" := (simpl_subst_goal).
@@ -515,6 +536,8 @@ Ltac fright := make_compatible ltac:(fun _ => apply DI2).
  *)
 
 Section Fintro.
+  Context {Σ_funcs : funcs_signature}.  
+  Context {Σ_preds : preds_signature}.
   Variable p : peirce.
 
   (* Lemmas for alternative ∀-intro and ∃-application.
@@ -897,17 +920,22 @@ Tactic Notation "fapply" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := m
  * Similar to coq. Also supports intro patterns.
  *)
 
-Lemma fassert_help `{peirce} A phi psi :
-  A ⊢ phi -> A ⊢ (phi --> psi) -> A ⊢ psi.
-Proof.
-  intros H1 H2. eapply IE. exact H2. exact H1.
-Qed.
+Section Fassert.
+  Context {Σ_funcs : funcs_signature}.
+  Context {Σ_preds : preds_signature}.
 
-Lemma fassert_help_T `{peirce} A phi psi :
-  A ⊩ phi -> A ⊩ (phi --> psi) -> A ⊩ psi.
-Proof.
-  intros H1 H2. eapply IE. exact H2. exact H1.
-Qed.
+  Lemma fassert_help `{peirce} A phi psi :
+    A ⊢ phi -> A ⊢ (phi --> psi) -> A ⊢ psi.
+  Proof.
+    intros H1 H2. eapply IE. exact H2. exact H1.
+  Qed.
+
+  Lemma fassert_help_T `{peirce} A phi psi :
+    A ⊩ phi -> A ⊩ (phi --> psi) -> A ⊩ psi.
+  Proof.
+    intros H1 H2. eapply IE. exact H2. exact H1.
+  Qed.
+End Fassert.
 
 Ltac fassert' phi := fun _ =>
   let H1 := fresh "H" in
@@ -1024,45 +1052,54 @@ Tactic Notation "fdestruct" constr(T) "as" constr(pat) := fdestruct'' T pat.
 
 
 
+
+
+
 (** Classical Logic *)
 
-Lemma case_help `{p : peirce} A phi psi :
-  A ⊢C (phi ∨ (phi --> ⊥) --> psi) -> A ⊢C psi.
-Proof.
-  intro H. eapply IE. apply H.
-  eapply IE. eapply Pc.
-  apply II. apply DI2. apply II.
-  eapply IE. apply Ctx. right. now left.
-  apply DI1. apply Ctx. now left.
-Qed.
+Section Classical.
+  Context {Σ_funcs : funcs_signature}.
+  Context {Σ_preds : preds_signature}.
 
-Lemma case_help_T `{p : peirce} A phi psi :
-  A ⊩C (phi ∨ (phi --> ⊥) --> psi) -> A ⊩C psi.
-Proof.
-  intro H. eapply IE. apply H.
-  eapply IE. eapply Pc.
-  apply II. apply DI2. apply II.
-  eapply IE. apply Ctx. firstorder.
-  apply DI1. apply Ctx. firstorder.
-Qed.
+  Lemma case_help A phi psi :
+    A ⊢C (phi ∨ (phi --> ⊥) --> psi) -> A ⊢C psi.
+  Proof.
+    intro H. eapply IE. apply H.
+    eapply IE. eapply Pc.
+    apply II. apply DI2. apply II.
+    eapply IE. apply Ctx. right. now left.
+    apply DI1. apply Ctx. now left.
+  Qed.
 
-Lemma contradiction_help `{p : peirce} A phi :
-  A ⊢C ((phi --> ⊥) --> ⊥) -> A ⊢C phi.
-Proof.
-  intro H. eapply IE. eapply Pc. apply II.
-  apply Exp. eapply IE. eapply Weak. apply H. firstorder.
-  apply II. eapply IE. apply Ctx. right. now left.
-  apply Ctx. now left.
-Qed.
+  Lemma case_help_T A phi psi :
+    A ⊩C (phi ∨ (phi --> ⊥) --> psi) -> A ⊩C psi.
+  Proof.
+    intro H. eapply IE. apply H.
+    eapply IE. eapply Pc.
+    apply II. apply DI2. apply II.
+    eapply IE. apply Ctx. firstorder.
+    apply DI1. apply Ctx. firstorder.
+  Qed.
 
-Lemma contradiction_help_T `{p : peirce} A phi :
-  A ⊩C ((phi --> ⊥) --> ⊥) -> A ⊩C phi.
-Proof.
-  intro H. eapply IE. eapply Pc. apply II.
-  apply Exp. eapply IE. eapply Weak. apply H. firstorder.
-  apply II. eapply IE. apply Ctx. firstorder.
-  apply Ctx. firstorder.
-Qed.
+  Lemma contradiction_help A phi :
+    A ⊢C ((phi --> ⊥) --> ⊥) -> A ⊢C phi.
+  Proof.
+    intro H. eapply IE. eapply Pc. apply II.
+    apply Exp. eapply IE. eapply Weak. apply H. firstorder.
+    apply II. eapply IE. apply Ctx. right. now left.
+    apply Ctx. now left.
+  Qed.
+
+  Lemma contradiction_help_T A phi :
+    A ⊩C ((phi --> ⊥) --> ⊥) -> A ⊩C phi.
+  Proof.
+    intro H. eapply IE. eapply Pc. apply II.
+    apply Exp. eapply IE. eapply Weak. apply H. firstorder.
+    apply II. eapply IE. apply Ctx. firstorder.
+    apply Ctx. firstorder.
+  Qed.
+
+End Classical.
 
 
 Tactic Notation "fclassical" constr(phi) "as" constr(H1) constr(H2) := 
@@ -1088,467 +1125,239 @@ Tactic Notation "fcontradict" := fcontradict as "?".
 
 
 
-Section FullLogic.
-
-  Variable p : peirce.
-
-
-  (* Basic tactics *)
-  Ltac freflexivity := fapply ax_refl.
 
 
 
-  (* ---------------------------------------------------------------------------- *)
-  (*                                    DEMO                                      *)
-  (* ---------------------------------------------------------------------------- *)
+Definition cast {X} {x y: X} {p: X -> Type}
+  : x = y -> p x -> p y
+  := fun e a => match e with eq_refl => a end.
 
-  Definition FA' := ax_add_zero::ax_add_rec::ax_mult_zero::ax_mult_rec::nil.
+Class Leibniz (Σ_funcs : funcs_signature) (Σ_preds : preds_signature) :=
+{
+  Eq_pred : preds ;
+  eq_binary : 2 = ar_preds Eq_pred ;
+  (* eq s t := @atom Σ_funcs Σ_preds _ Eq (@eq_rect _ _ (fun n : nat => Vector.t term n) (Vector.cons term s 1 (Vector.cons term t 0 (Vector.nil term))) _ eq_binary) ; *)
+  eq s t := @atom Σ_funcs Σ_preds _ Eq_pred (cast eq_binary (Vector.cons term s 1 (Vector.cons term t 0 (Vector.nil term)))) ;
 
-  Definition ax_refl := (∀ $0 == $0).
-  Definition ax_sym := (∀ ∀ $0 == $1 --> $1 == $0).
-  Definition ax_trans := (∀∀∀ $0 == $1 --> $1 == $2 --> $0 == $2).
-
-  Definition ax_eq_succ := (∀∀ $0 == $1 --> σ $0 == σ $1).
-  Definition ax_eq_add := (∀∀∀∀ $0 == $1 --> $2 == $3 --> $0 ⊕ $2 == $1 ⊕ $3).
-  Definition ax_eq_mult := (∀∀∀∀ $0 == $1 --> $2 == $3 --> $0 ⊗ $2 == $1 ⊗ $3).
-
-  Definition FA := ax_refl::ax_sym::ax_trans::ax_eq_succ::ax_eq_add::ax_eq_mult::FA'.
-
-  Lemma num_add_homomorphism x y :
-    FA ⊢ (num x ⊕ num y == num (x + y)).
-  Proof.
-    induction x; cbn.
-    - fapply ax_add_zero. (* Arguments are infered! *)
-    - feapply ax_trans.
-      + fapply ax_add_rec. 
-      + feapply ax_eq_succ. exact IHx.
-  Qed.
-
-  Lemma num_mult_homomorphism x y : FA ⊢ ( num x ⊗ num y == num (x * y) ).
-  Proof.
-    induction x; cbn.
-    - fapply ax_mult_zero.
-    - feapply ax_trans.
-      + feapply ax_trans.
-        * fapply ax_mult_rec.
-        * feapply ax_eq_add. fapply ax_refl. exact IHx.
-      + apply num_add_homomorphism.
-  Qed.
+  Axioms : list form ;
+  sym `{peirce} : Axioms ⊢ ∀ ∀ (eq ($0) ($1) --> eq ($1) ($0)) ;
+  sym_T `{peirce} T : Axioms ⊏ T ->  Axioms ⊢ ∀ ∀ (eq ($0) ($1) --> eq ($1) ($0)) ;
+  leibniz `{peirce} A phi t t' : Axioms <<= A -> A ⊢ eq t t' -> A ⊢ phi[t..] -> A ⊢ phi[t'..] ;
+  leibniz_T `{peirce} T phi t t' : Axioms ⊏ T -> T ⊩ eq t t' -> T ⊩ phi[t..] -> T ⊩ phi[t'..]
+}.
 
 
+(* Lemma eq_subst_help `{funcs_signature} f y t1 t2 (e : 2 = y) :
+  Vector.map f (cast e (Vector.cons term t1 1 (Vector.cons term t2 0 (Vector.nil term)))) = cast e (@Vector.map term term f _ (Vector.cons term t1 1 (Vector.cons term t2 0 (Vector.nil term)))).
+Proof.
+  destruct e. reflexivity.
+Qed.
 
-  Lemma leibniz_term (t t' s : term) :
-    FA ⊢ (t == t' --> s[t..] == s[t'..]).
-  Proof.
-    fintros. induction s; cbn.
-    - destruct x; cbn. ctx. freflexivity.
-    - destruct F; repeat depelim v; cbn.
-      * freflexivity.
-      * fapply ax_eq_succ. apply IH. left.
-      * fapply ax_eq_add; apply IH. left. right. left.
-      * fapply ax_eq_mult; apply IH. left. right. left.
-  Qed.
+Lemma eq_subst `{L : Leibniz} t1 t2 s :
+  (eq t1 t2)[s] = eq (t1[s]) (t2[s]).
+Proof.
+  cbn. rewrite eq_subst_help. cbn. reflexivity.
+Qed.
 
-  Lemma leibniz A phi t t' :
-    FA <<= A -> A ⊢ (t == t') -> A ⊢ phi[t..] -> A ⊢ phi[t'..].
-  Proof.
-    intros X. revert t t'. 
-    enough (forall t t', A ⊢ (t == t') -> A ⊢ (phi[t..] --> phi[t'..])) as H0.
-    { intros. specialize (H0 t t' H). fapply (H0 H1). }
-    induction phi; cbn; intros. 1-3: fintros.
-    - ctx.
-    - destruct P. repeat depelim v. cbn in *. feapply ax_trans.
-      + feapply ax_trans. pose (leibniz_term t' t h) as H'. 
-        fapply H'. fapply ax_sym. fapply H. ctx.
-      + pose (leibniz_term t t' h0) as H'. fapply H'. fapply H.
-    - destruct b. 1,2: specialize (IHphi1 t t' H); specialize (IHphi2 t t' H).
-      + fsplit. 
-        * fapply IHphi1. fdestruct 0. ctx. 
-        * fapply IHphi2. fdestruct 0. ctx.
-      + fdestruct 0. 
-        * fleft. fapply IHphi1. ctx.
-        * fright. fapply IHphi2. ctx.
-      + fintros. specialize (IHphi2 t t' H). fapply IHphi2. 
-        fapply 1. assert (A ⊢ (t' == t)) as H' by now fapply ax_sym.
-        specialize (IHphi1 t' t H'). fapply IHphi1. ctx.
-    - destruct q.
-      + 
-        (* enough (forall u1 u2, FA ⊢ ((∀ phi[u1][up t..][u2]) --> (∀ phi[u1][up t'..][u2]))).
-        { specialize (H0 var var). now rewrite !subst_var in H0. }
-        assert (forall (t t' : term) u1 u2, FA ⊢ (t == t') -> FA ⊢ (phi[u1][t..][u2] --> phi[u1][t'..][u2])) as IH' by admit. *)
-
-        (* ? *)
-  Admitted.
-
-  Lemma leibniz_T T phi t t' :
-    FA ⊏ T -> T ⊩ (t == t') -> T ⊩ phi[t..] -> T ⊩ phi[t'..].
-  Proof.
-  Admitted.
+Lemma symm' `{funcs_signature, preds_signature, peirce, Leibniz} s t :
+  Axioms ⊢ eq s t -> Axioms ⊢ eq t s.
+Proof.
+  intros. enough (Axioms ⊢ eq (($0)[t..]) (s[↑][t..])) as X by now rewrite subst_term_shift in X.
+  pose (Axioms ⊢ (eq ($0) (s[↑]))[t..]). cbn in P.
+  simpl_subst.
+  cbn. *)
 
 
+Fixpoint up_n `{funcs_signature} n sigma := match n with
+| 0 => sigma
+| S n' => up (up_n n' sigma)
+end.
 
-  Fixpoint up_n n sigma := match n with
-  | 0 => sigma
-  | S n' => up (up_n n' sigma)
+Ltac shift_n n t := 
+  match n with
+  | 0 => t
+  | S ?n' => shift_n n' (t`[↑])
   end.
 
-  Ltac shift_n n t := 
-    match n with
-    | 0 => t
-    | S ?n' => shift_n n' (t[↑])
-    end.
+Ltac vector_map_ltac v f :=
+  match v with
+  | Vector.nil ?t => constr:(Vector.nil t)
+  | @Vector.cons _ ?x _ ?v' =>
+    let x' := f x in 
+    let v'' := vector_map_ltac v' f in
+    constr:(@Vector.cons _ x' _ v'')
+  end.
 
-  Ltac vector_map_ltac v f :=
-    match v with
-    | Vector.nil _ => constr:(Vector.nil term)
-    | Vector.cons ?x ?v => 
-      let x' := f x in 
-      let v' := vector_map_ltac v f in
-      constr:(Vector.cons x' v')
-    end.
+(* Returns a new formula where all occurences of `t` are turned into
+ * `($n)[up_n n t..]` and every other term `s` into `s[up_n n ↑][up_n t..]`,
+ * where `n` is the quantor depth. *)
+Ltac add_shifts' n t G :=
+  let f := add_shifts' n t in 
+  let t_shifted := shift_n n t in
+  match G with
+  (* Terms: *)
+  | t_shifted => constr:(($n)`[up_n n t..])
+  | $(?m) => constr:(($m)`[up_n n ↑]`[up_n n t..])
+  | func ?fu ?vec => let vec' := vector_map_ltac vec f in constr:(func fu vec')
+  (* Formulas: *)
+  | fal => constr:(fal[up_n n ↑][up_n n t..])
+  | atom ?P ?vec => let vec' := vector_map_ltac vec f in constr:(atom P vec')
+  | bin ?op ?u ?v => let u' := f u in let v' := f v in constr:(bin op u' v')
+  | quant ?op ?u => let u' := add_shifts' (S n) t u in constr:(quant op u')
+  (* Fallback for variables which cannot be matched syntactically: *)
+  | ?u => match type of u with 
+      | form => constr:(u[up_n n ↑][up_n n t..])
+      | term => constr:(u`[up_n n ↑]`[up_n n t..])
+      end
+  end.
+Ltac add_shifts := add_shifts' 0.
 
-  (* Returns a new formula where all occurences of `t` are turned into
-   * `($n)[up_n n t..]` and every other term `s` into `s[up_n n ↑][up_n t..]`,
-   * where `n` is the quantor depth. *)
-  Ltac add_shifts' n t G :=
-    let f := add_shifts' n t in 
-    let t_shifted := shift_n n t in
-    match G with
-    (* Terms: *)
-    | t_shifted => constr:(($n)[up_n n t..])
-    | $(?m) => constr:(($m)[up_n n ↑][up_n n t..])
-    | func ?fu ?vec => let vec' := vector_map_ltac vec f in constr:(func fu vec')
-    (* Formulas: *)
-    | fal => constr:(fal[up_n n ↑][up_n n t..])
-    | atom ?P ?vec => let vec' := vector_map_ltac vec f in constr:(atom P vec')
-    | bin ?op ?u ?v => let u' := f u in let v' := f v in constr:(bin op u' v')
-    | quant ?op ?u => let u' := add_shifts' (S n) t u in constr:(quant op u')
-    (* Fallback for variables which cannot be matched syntactically: *)
-    | ?u => constr:(u[up_n n ↑][up_n n t..])
-    end.
-  Ltac add_shifts := add_shifts' 0.
+(* Returns a new formula where all occurences of `s[up_n n ↑][up_n nt..]` 
+ * in G are turned into `s[up_n n ↑]` and `($n)[up_n n t..]` into `$n`. *)
+Ltac remove_shifts G t :=
+  match G with 
+  | context C[ ?s[up_n ?n ↑][up_n ?n t..] ] => let G' := context C[ s[up_n n ↑] ] in remove_shifts G' t
+  | context C[ ?s`[up_n ?n ↑]`[up_n ?n t..] ] => let G' := context C[ s`[up_n n ↑] ] in remove_shifts G' t
+  | context C[ ($ ?n)`[up_n ?n t..] ] => let G' := context C[ $n ] in remove_shifts G' t
+  | _ => G
+  end.
 
-  (* Returns a new formula where all occurences of `s[up_n n ↑][up_n nt..]` 
-   * in G are turned into `s[up_n n ↑]` and `($n)[up_n n t..]` into `$n`. *)
-  Ltac remove_shifts G t :=
-    match G with 
-    | context C[ ?s[up_n ?n ↑][up_n ?n t..] ] => let G' := context C[ s[up_n n ↑] ] in remove_shifts G' t
-    | context C[ ($ ?n)[up_n ?n t..] ] => let G' := context C[ $n ] in remove_shifts G' t
-    | _ => G
-    end.
+Ltac frewrite' T A back := fun contxt =>
+  let H := fresh "H" in
+  turn_into_hypothesis T H contxt;
+  fspecialize_list H A; 
+  instantiate_evars H; 
+  simpl_subst H;
+  custom_unfold;
+  match get_form_hyp H with atom ?p (@Vector.cons _ ?_t _ (@Vector.cons _ ?_t' _ (Vector.nil term))) =>
+    (* Make sure that we have equality *)
+    assert (p = Eq_pred) as _ by reflexivity;
 
-  Ltac frewrite' T A back := fun contxt =>
-    let H := fresh "H" in
-    turn_into_hypothesis T H contxt;
-    fspecialize_list H A; 
-    instantiate_evars H; 
-    simpl_subst H;
-    match get_form_hyp H with (?_t == ?_t') =>
-      let t := match back with true => _t' | false => _t end in
-      let t' := match back with true => _t | false => _t' end in
-
-      (* 1. Replace each occurence of `t` with `($n)[up_n n t..]` and every
-       *  other `s` with `s[up_n n ↑][up_n n t..]`. The new formula is 
-       *  created with the [add_shifts] tactic and proven in place. *)
-      let C := get_context_goal in
-      let G := get_form_goal in
-      let X := fresh in 
-      let G' := add_shifts t G in
-      match goal with
-      | [ |- _ ⊢ _ ] => enough (C ⊢ G') as X
-      | [ |- _ ⊩ _ ] => enough (C ⊩ G') as X
-      end;
-      [
-        repeat match type of X with context K[ ?u[up_n ?n ↑][up_n ?n t..] ] =>
-          let R := fresh in
-          (* TODO: Prove general lemma for this: *)
-          assert (u[up_n n ↑][up_n n t..] = u) as R; [
-            rewrite subst_term_comp; apply subst_term_id; 
-            let a := fresh in intros a;
-            (do 10 try destruct a); reflexivity |];
-          rewrite R in X
-        end;
-        apply X
-      |];
-
-      (* 2. Pull out the [t..] substitution *)
-      match goal with 
-      | [ |- ?U ⊢ ?G ] => let G' := remove_shifts G t in change (U ⊢ G'[t..])
-      | [ |- ?U ⊩ ?G ] => let G' := remove_shifts G t in change (U ⊩ G'[t..])
-      end;
-      
-      (* 3. Change [t..] to [t'..] using leibniz. For some reason
-       *  we cannot directly [apply leibniz with (t := t')] if t'
-       *  contains ⊕, σ, etc. But evar seems to work. *)
-      let t'' := fresh "t" in 
-      match goal with
-      | [ |- _ ⊢ _ ] => eapply (leibniz _ _ ?[t''])
-      | [ |- _ ⊩ _ ] => eapply (leibniz_T _ _ ?[t''])
-      end;
-      [ instantiate (t'' := t'); firstorder |
-        match back with
-        | false => feapply ax_sym; fapply H
-        | true => apply H
-        end
-      | ];
-      
-      (* 4. Pull substitutions inward, but don't unfold `up_n` *)
-      cbn -[up_n];
-
-      (* 5. Turn subst_term calls back into []-Notation *)
-      repeat match goal with [ |- context C[subst_term ?sigma ?s] ] =>
-        let G' := context C[ s[sigma] ] in change G'
-      end;
-
-      (* 6. Fix simplification that occurs because of cbn *)
-      repeat match goal with [ |- context C[up_n ?n ↑ ?a] ] =>
-        let G' := context C[ ($a)[up_n n ↑] ] in change G'
-      end;
-
-      (* 7. Change `up (up ...)` back into `up_n n ...` *)
-      repeat match goal with 
-      | [ |- context C[up_n ?n (up ?s)]] => let G' := context C[up_n (S n) s] in change G'
-      | [ |- context C[up ?s]] => let G' := context C[up_n 1 s] in change G'
-      end;
-
-      (* 6. Simplify *)
-      repeat match goal with [ |- context K[ ?u[up_n ?n ↑][up_n ?n t'..] ]] =>
+    let t := match back with true => _t' | false => _t end in
+    let t' := match back with true => _t | false => _t' end in
+    
+    (* 1. Replace each occurence of `t` with `($n)[up_n n t..]` and every
+     *  other `s` with `s[up_n n ↑][up_n n t..]`. The new formula is 
+     *  created with the [add_shifts] tactic and proven in place. *)
+    let C := get_context_goal in
+    let G := get_form_goal in
+    let X := fresh in
+    let G' := add_shifts t G in
+    match goal with
+    | [ |- _ ⊢ _ ] => enough (C ⊢ G') as X
+    | [ |- _ ⊩ _ ] => enough (C ⊩ G') as X
+    end;
+    [
+      repeat match type of X with context K[ ?u`[up_n ?n ↑]`[up_n ?n t..] ] =>
         let R := fresh in
         (* TODO: Prove general lemma for this: *)
-        assert (u[up_n n ↑][up_n n t'..] = u) as R; [
+        assert (u`[up_n n ↑]`[up_n n t..] = u) as R; [
           rewrite subst_term_comp; apply subst_term_id; 
           let a := fresh in intros a;
           (do 10 try destruct a); reflexivity |];
-        rewrite ! R;
-        clear R
+        rewrite R in X
       end;
-
-      (* Base case for rewrite without quantors *)
-      cbn; try rewrite !subst_shift; try rewrite !subst_term_shift;
-
-      (* Use notation *)
-      repeat match goal with [ |- context C[S >> var] ] =>
-        let G' := context C[↑] in change G'
-      end;
-      try fold zero
+      apply X
+    |];
+    
+    (* 2. Pull out the [t..] substitution *)
+    match goal with 
+    | [ |- ?U ⊢ ?G ] => let G' := remove_shifts G t in change (U ⊢ G'[t..])
+    | [ |- ?U ⊩ ?G ] => let G' := remove_shifts G t in change (U ⊩ G'[t..])
     end;
-    clear H.
-  
-  Tactic Notation "frewrite" constr(T) := make_compatible ltac:(frewrite' T constr:([] : list form) constr:(false)).
-  Tactic Notation "frewrite" "(" constr(T) constr(x1) ")" := make_compatible ltac:(frewrite' T constr:([x1]) constr:(false)).
-  Tactic Notation "frewrite" "(" constr(T) constr(x1) constr(x2) ")" := make_compatible ltac:(frewrite' T constr:([x1;x2]) constr:(false)).
-  Tactic Notation "frewrite" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(frewrite' T constr:([x1;x2;x3]) constr:(false)).
-  
-  Tactic Notation "frewrite" "<-" constr(T) := make_compatible ltac:(frewrite' T constr:([] : list form) constr:(true)).
-  Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) ")" := make_compatible ltac:(frewrite' T constr:([x1]) constr:(true)).
-  Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) constr(x2) ")" := make_compatible ltac:(frewrite' T constr:([x1;x2]) constr:(true)).
-  Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(frewrite' T constr:([x1;x2;x3]) constr:(true)).
+    
+    (* 3. Change [t..] to [t'..] using leibniz. For some reason
+     *  we cannot directly [apply leibniz with (t := t')] if t'
+     *  contains ⊕, σ, etc. But evar seems to work. *)
+    let t'' := fresh "t" in 
+    match goal with
+    | [ |- _ ⊢ _ ] => eapply (leibniz _ _ ?[t''])
+    | [ |- _ ⊩ _ ] => eapply (leibniz_T _ _ ?[t''])
+    end;
+    [ instantiate (t'' := t'); firstorder |
+      match back with
+      | false => let H_sym := fresh in assert (H_sym := sym); feapply H_sym; clear H_sym; fapply H
+      | true => apply H
+      end
+    | ];
+    
+    (* 4. Pull substitutions inward, but don't unfold `up_n` *)
+    cbn -[up_n];
+    
+    (* 5. Turn subst_term calls back into []-Notation *)
+    (* repeat match goal with [ |- context C`[subst_term ?sigma ?s] ] =>
+      let G' := context C[ s`[sigma] ] in change G'
+    end; *)
+
+    (* 6. Fix simplification that occurs because of cbn *)
+    repeat match goal with [ |- context C[up_n ?n ↑ ?a] ] =>
+      let G' := context C[ ($a)[up_n n ↑] ] in change G'
+    end;
+
+    (* 7. Change `up (up ...)` back into `up_n n ...` *)
+    repeat match goal with 
+    | [ |- context C[up_n ?n (up ?s)]] => let G' := context C[up_n (S n) s] in change G'
+    | [ |- context C[up ?s]] => let G' := context C[up_n 1 s] in change G'
+    end;
+    
+    (* 8. Simplify *)
+    repeat match goal with [ |- context K[ ?u `[up_n ?n ↑]`[up_n ?n t'..] ]] =>
+      let R := fresh in
+      (* TODO: Prove general lemma for this: *)
+      assert (u`[up_n n ↑]`[up_n n t'..] = u) as R; [
+        rewrite subst_term_comp; apply subst_term_id; 
+        let a := fresh in intros a;
+        (do 10 try destruct a); reflexivity |];
+      rewrite ! R;
+      clear R
+    end;
+
+    (* Base case for rewrite without quantors *)
+    cbn; try rewrite !subst_shift; try rewrite !subst_term_shift;
+
+    (* Final simplifications *)
+    custom_fold;
+    simpl_subst
+  end;
+  clear H.
+
+Tactic Notation "frewrite" constr(T) := make_compatible ltac:(frewrite' T constr:([] : list form) constr:(false)).
+Tactic Notation "frewrite" "(" constr(T) constr(x1) ")" := make_compatible ltac:(frewrite' T constr:([x1]) constr:(false)).
+Tactic Notation "frewrite" "(" constr(T) constr(x1) constr(x2) ")" := make_compatible ltac:(frewrite' T constr:([x1;x2]) constr:(false)).
+Tactic Notation "frewrite" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(frewrite' T constr:([x1;x2;x3]) constr:(false)).
+
+Tactic Notation "frewrite" "<-" constr(T) := make_compatible ltac:(frewrite' T constr:([] : list form) constr:(true)).
+Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) ")" := make_compatible ltac:(frewrite' T constr:([x1]) constr:(true)).
+Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) constr(x2) ")" := make_compatible ltac:(frewrite' T constr:([x1;x2]) constr:(true)).
+Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(frewrite' T constr:([x1;x2;x3]) constr:(true)).
 
 
 
 
-
-  (* With [frewrite] the proofs from above get even shorter! *)
-
-  Lemma num_add_homomorphism' x y :
-    FA ⊢ (num x ⊕ num y == num (x + y)).
-  Proof.
-    induction x; cbn.
-    - fapply ax_add_zero.
-    - frewrite <- IHx. fapply ax_add_rec.
-  Qed.
-
-  Lemma num_mult_homomorphism' x y : FA ⊢ ( num x ⊗ num y == num (x * y) ).
-  Proof.
-    induction x; cbn.
-    - fapply ax_mult_zero.
-    - frewrite (ax_mult_rec (num x) (num y)). (* Sadly we need to give the arguments. TODO: Extend tactics to work with terms containing evars *)
-      frewrite IHx. apply num_add_homomorphism'.
-  Qed.
-
-
-
-  (* Proof mode demo: *)
-
-  Goal forall t t', FA ⊢ (t == t' --> zero ⊕ σ t == σ t').
-  Proof.
-    intros. fstart. fintros. frewrite "H". fapply ax_add_zero.
-  Qed.
-
-  Goal forall a b c, [] ⊢ (a --> (a --> b) --> (b --> c) --> c).
-  Proof.
-    intros. fstart. fintros. fapply "H1". fapply "H0". fapply "H".
-  Qed.
-
-
-
-  (* Rewrite under quantors: *)
-
-  Goal forall t t', FA ⊢ (t == t') -> FA ⊢ ∀ $0 ⊕ σ t[↑] == t' ⊕ σ $0.
-  Proof.
-    intros. frewrite H. 
-  Abort.
-
-  Goal forall t t', FA ⊢ (t == t') -> FA ⊢ ∀∃ $0 ⊕ σ t == t'[↑][↑] ⊕ σ $0.
-  Proof.
-    intros. frewrite <- H. 
-  Abort.
-
-
-
-  (* Variable names instead of de Bruijn: *)
-  Goal FA ⊢ ∀ ∀ $1 == $0 --> σ $1 == zero ⊕ σ $0.
-  Proof.
-    fstart. fintros x y "H". frewrite "H". frewrite (ax_add_zero (σ y)).
-    fapply ax_refl.
-  Qed.
-
-
-  (* Classical logic *)
-  Goal forall phi, [] ⊢C (phi ∨ (phi --> ⊥)).
-  Proof.
-    intro. fstart. fclassical phi.
-    - fleft. fapply "H".
-    - fright. fapply "H".
-  Qed.
-
-  Goal forall phi, [] ⊢C (((phi --> ⊥) --> ⊥) --> phi).
-  Proof.
-    intro. fstart. fintros. contradict as "X". fapply "H". fapply "X".
-  Qed.
-
-
-
-  (* Theories *)
-  Definition TFA phi := phi el FA.
-
-  Lemma num_add_homomorphism_T x y :
-    TFA ⊩ (num x ⊕ num y == num (x + y)).
-  Proof.
-    induction x; cbn.
-    - fapply ax_add_zero.
-    - fstart. frewrite <- IHx. fapply ax_add_rec.
-  Qed.
-
-  Definition TFA_ind : theory := fun phi => phi el FA \/ exists psi, phi = PA_induction psi.
-
-  Lemma add_zero_right :
-    TFA_ind ⊩ ∀ $0 ⊕ zero == $0.
-  Proof.
-    fstart. assert (TFA_ind ⊩ PA_induction ($0 ⊕ zero == $0)) as H.
-    { apply Ctx. right. now eexists. }
-    unfold PA_induction in H. fapply H; clear H.
-    - fapply ax_add_zero.
-    - fassert ax_trans as "trans". ctx.
-      fassert ax_add_rec as "add_rec". ctx.
-      fassert ax_eq_succ as "eq_succ". ctx.
-      fintros x "IH". feapply "trans".
-      + fapply "add_rec".
-      + fapply "eq_succ". fapply "IH".
-  Qed.
+Ltac fexists x := make_compatible ltac:(fun _ => 
+  apply ExI with (t := x); 
+  simpl_subst).
 
 
 
 
-  (* XM for closed, quantor free formulas: *)
+(* Section Test.
 
-  Lemma eq_num t :
-    bound_term 0 t = true -> exists n, FA ⊢ (t == num n).
-  Proof.
-    intros H0. induction t.
-    - now exfalso.
-    - destruct F; repeat depelim v; cbn in H0.
-      + exists 0. fapply ax_refl.
-      + destruct (IH h) as [n H]. left. now destruct (bound_term 0 h).
-        exists (S n). cbn. now fapply ax_eq_succ.
-      + destruct (IH h) as [n1 H1]. left. now destruct (bound_term 0 h).
-        destruct (IH h0) as [n2 H2]. right. left. now do 2 destruct bound_term.
-        exists (n1 + n2). assert (H := num_add_homomorphism n1 n2). frewrite <- H.
-        now fapply ax_eq_add.
-      + destruct (IH h) as [n1 H1]. left. now destruct (bound_term 0 h).
-        destruct (IH h0) as [n2 H2]. right. left. now do 2 destruct bound_term.
-        exists (n1 * n2). assert (H := num_mult_homomorphism n1 n2). frewrite <- H.
-        now fapply ax_eq_mult.
-  Qed.
+Require Import PA.
 
-  Fixpoint quantor_free (phi : form) := match phi with
-  | fal => True
-  | atom _ _ => True
-  | bin _ phi1 phi2 => quantor_free phi1 /\ quantor_free phi2
-  | quant _ _ => False
-  end.
+Variable p : peirce.
 
-  Lemma xm_quantor_free phi :
-    closed phi = true -> quantor_free phi -> (ax_zero_succ::ax_succ_inj::FA) ⊢ (phi ∨ (phi --> ⊥)).
-  Proof.
-    intros H0 H1. induction phi; fstart.
-    - fright. fintros "F". fapply "F".
-    - destruct P. repeat depelim v. cbn in H0, H1. clear H1. 
-      destruct (eq_num h) as [n1 H1]. now destruct bound_term.
-      destruct (eq_num h0) as [n2 H2]. now do 2 destruct bound_term.
-      frewrite H1. frewrite H2. clear H1 H2. 
-      fstop; revert n2; induction n1 as [|n1 IH]; intros; fstart; cbn.
-      + destruct n2; cbn.
-        * fleft. fapply ax_refl.
-        * fright. fapply ax_zero_succ.
-      + destruct n2; cbn.
-        * fright. fintros. feapply ax_zero_succ. feapply ax_sym. ctx.
-        * specialize (IH n2). fdestruct IH as "[IH|IH]".
-          -- fleft. frewrite "IH". fapply ax_refl.
-          -- fright. fintro. fapply "IH". fapply ax_succ_inj. ctx.
-    - cbn in H0, H1. destruct (bound 0 phi1) eqn:H2. 2: now exfalso.
-      fassert (phi1 ∨ (phi1 --> ⊥)) as "IH1" by now fapply IHphi1.
-      fassert (phi2 ∨ (phi2 --> ⊥)) as "IH2" by now fapply IHphi2.
-      destruct b.
-      + fdestruct "IH1" as "[IH1|IH1]". fdestruct "IH2" as "[IH2|IH2]".
-        * fleft. fsplit; ctx.
-        * fright. fintros "[ ]". fapply "IH2". ctx.
-        * fright. fintros "[ ]". fapply "IH1". ctx.
-      + fdestruct "IH1" as "[IH1|IH1]". 2: fdestruct "IH2" as "[IH2|IH2]".
-        * fleft. fleft. ctx.
-        * fleft. fright. ctx.
-        * fright. fintros "[|]". fapply "IH1"; ctx. fapply "IH2"; ctx.
-      + fdestruct "IH1" as "[IH1|IH1]". fdestruct "IH2" as "[IH2|IH2]".
-        * fleft. fintro. ctx.
-        * fright. fintro "H1". fapply "IH2". fapply "H1". ctx.
-        * fleft. fintro. fexfalso. fapply "IH1". ctx.
-    - now exfalso.
-  Qed.
+Ltac custom_fold ::= fold zero in *.
+Ltac custom_unfold ::= unfold zero in *.
+Ltac custom_simpl ::= try rewrite !numeral_subst_invariance.
+
+Program Instance PA_Leibniz : Leibniz PA_funcs_signature PA_preds_signature.
+Next Obligation. exact Eq. Defined.
+Next Obligation. exact FA. Defined.
+Next Obligation. Admitted.
+Next Obligation. Admitted.
+Next Obligation. Admitted.
+Next Obligation. Admitted.
 
 
-
-
-  Lemma numeral_subst_invariance : forall n rho, (num n)[rho] = num n.
-  Proof.
-    induction n.
-    - reflexivity.
-    - intros rho. cbn. now rewrite IHn.
-  Qed.
-  
-  Ltac fexists x := make_compatible ltac:(fun _ => 
-    apply ExI with (t := x); 
-    simpl_subst;
-    rewrite !numeral_subst_invariance).
-
-
-  Require Import Hoas.
-  
-  Lemma division_theorem x y :
-    FA ⊢ << (∃ q r, (∃ k, r ⊕ k == σ bEmbedT (num y)) ∧ bEmbedT (num x) == r ⊕ q ⊗ σ bEmbedT (num y))%hoas.
-  Proof.
-    induction x; cbn; fstart.
-    - fexists zero. fexists zero. fsplit.
-      + fexists (σ num y). fapply ax_add_zero.
-      + frewrite (ax_mult_zero (σ num y)). frewrite (ax_add_zero zero). 
-        fapply ax_refl.
-    - fdestruct IHx as "[? [? [[? H1] H2]]]".
-      rewrite !numeral_subst_invariance.
-      rename x0 into q. rename x1 into r. rename x2 into k.
-      fexists q. fexists (σ r). fsplit.
-      + admit.
-      + frewrite (ax_add_rec (q ⊗ σ num y) r). fapply ax_eq_succ. fapply "H2".
-  Abort.
-
-End FullLogic.
-
-
+End Test. *)
