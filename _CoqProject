@@ -11,3 +11,4 @@ Deduction.v
 PA.v
 Hoas.v
 Theories.v
+ProofMode.v

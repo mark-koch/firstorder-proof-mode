@@ -79,8 +79,8 @@ Section ND_def.
       1-2,7-15: eauto using in_map.
       - apply AllI. setoid_rewrite map_map in IHprv. erewrite map_map, map_ext.
         apply IHprv. intros ?. comp. admit.
-      - specialize (IHprv xi). apply AllE with (t0 := t [xi]) in IHprv. admit.
-      - specialize (IHprv xi). eapply ExI with (t0 := t [xi]). admit.
+      - specialize (IHprv xi). apply AllE with (t0 := t `[xi]) in IHprv. admit.
+      - specialize (IHprv xi). eapply ExI with (t0 := t `[xi]). admit.
       - eapply ExE in IHprv1. eassumption. rewrite map_map.
         specialize (IHprv2 (up xi)). erewrite <- up_form.
         erewrite map_map, map_ext in IHprv2. apply IHprv2.

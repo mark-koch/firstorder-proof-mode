@@ -382,7 +382,7 @@ Section ND.
   Proof.
     intros H. assert (H' : FA ⊢ ax_sym). apply Ctx. firstorder.
     eapply (AllE _ t') in H'. cbn in H'. apply (AllE _ t) in H'. cbn in H'.
-    change (FA ⊢ (t == t'[↑][t..] --> t'[↑][t..] == t)) in H'.
+    change (FA ⊢ (t == t'`[↑]`[t..] --> t'`[↑]`[t..] == t)) in H'.
     rewrite subst_term_shift in H'. apply (IE _ _ _ H'), H.
   Qed.
 
@@ -391,9 +391,9 @@ Section ND.
   Proof.
     intros H. assert (H' : FA ⊢ ax_sym). apply Ctx. firstorder.
     eapply (AllE _ t') in H'. cbn in H'.
-    change (FA ⊢ (∀ $0 == t'[↑] --> t'[↑] == $0)) in H'.
+    change (FA ⊢ (∀ $0 == t'`[↑] --> t'`[↑] == $0)) in H'.
     apply (AllE _ t) in H'.
-    change (FA ⊢ (t == t'[↑][t..] --> t'[↑][t..] == t)) in H'.
+    change (FA ⊢ (t == t'`[↑]`[t..] --> t'`[↑]`[t..] == t)) in H'.
     rewrite subst_term_shift in H'. apply (IE _ _ _ H'), H.
   Qed.
   
@@ -403,12 +403,12 @@ Section ND.
   Proof.
     intros H1 H2. assert (H : FA ⊢ ax_trans). apply Ctx. firstorder.
     apply (AllE _ c) in H. cbn in H.
-    change (FA ⊢ ∀∀ $0 == $1 --> $1 == c[↑][↑] --> $0 == c[↑][↑]) in H.
+    change (FA ⊢ ∀∀ $0 == $1 --> $1 == c`[↑]`[↑] --> $0 == c`[↑]`[↑]) in H.
     apply (AllE _ b) in H. cbn in H.
-    change (FA ⊢ ∀ $0 == b[↑] --> b[↑] == c[↑][↑][up b..] --> $0 == c[↑][↑][up b..]) in H.
+    change (FA ⊢ ∀ $0 == b`[↑] --> b`[↑] == c`[↑]`[↑]`[up b..] --> $0 == c`[↑]`[↑]`[up b..]) in H.
     apply (AllE _ a) in H. cbn in H.
-    change (FA ⊢ (a == b[↑][a..] --> b[↑][a..] == c[↑][↑][up b..][a..] --> a == c[↑][↑][up b..][a..])) in H.
-    rewrite (up_term (c[↑])) in H. rewrite !subst_term_shift in H.
+    change (FA ⊢ (a == b`[↑]`[a..] --> b`[↑]`[a..] == c`[↑]`[↑]`[up b..]`[a..] --> a == c`[↑]`[↑]`[up b..]`[a..])) in H.
+    rewrite (up_term (c`[↑])) in H. rewrite !subst_term_shift in H.
 
     enough (FA ⊢ (b == c --> a == c)) as H'. apply (IE _ _ _ H'), H2.
     apply (IE _ _ _ H), H1.
@@ -446,7 +446,7 @@ Section ND.
 
       assert (H2 : FA ⊢ ax_eq_succ). apply Ctx. firstorder.
       eapply (AllE _ ?[b]) in H2. eapply (AllE _ ?[a]) in H2. cbn in H2.
-      change (FA ⊢ (?a == ?b[↑][?a..] --> σ ?a == σ ?b[↑][?a..])) in H2.
+      change (FA ⊢ (?a == ?b`[↑]`[?a..] --> σ ?a == σ ?b`[↑]`[?a..])) in H2.
       rewrite subst_term_shift in H2.
 
       eapply IE. exact H2. exact IHx.

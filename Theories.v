@@ -127,9 +127,9 @@ Lemma map_shift_up_down_eq A T :
   A ⊏ mapT (subst_form ↑) T -> map (subst_form ↑) (map (subst_form shift_down) A) = A.
 Proof.
   intros H1. induction A. reflexivity. cbn. f_equal.
-  - destruct (H1 a) as [f [H2 <-]]. now left. 
-    change (subst_form ↑ f[↑][shift_down] = subst_form ↑ f). 
-    rewrite subst_comp. f_equal. now apply subst_id.
+  - destruct (H1 a) as [f [H2 <-]]. now left.
+    enough (f[↑ >> subst_term shift_down][↑] = f[↑]) as X by now rewrite <- subst_comp in X.
+    f_equal. now apply subst_id.
   - firstorder.
 Qed.
 
