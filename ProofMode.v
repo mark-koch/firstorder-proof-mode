@@ -837,7 +837,8 @@ End Fapply.
  * without leading quantifiers. It solves the goal `X ⊢ g` by adding subgoals for
  * each premise `p1, p2, ..., pn`.
  * Also supports formulas of Type `H : X ⊢ ... --> (pn <--> g)` or 
- * `H : X ⊢ ... --> (g <--> pn)` *)
+ * `H : X ⊢ ... --> (g <--> pn)`.
+ * If ∀-quantifiers occur inbetween, they are instantiated with evars. *)
 Ltac fapply_without_quant H :=
   tryif exact H then idtac else
   let Hs := fresh "Hs" in 
@@ -865,10 +866,25 @@ Ltac fapply_without_quant H :=
     | [ |- _ ⊢ _] => tryif apply (fapply_equiv_l _ _ _ _ H) then idtac else apply (fapply_equiv_r _ _ _ _ H)
     | [ |- _ ⊩ _] => tryif apply (fapply_equiv_l_T _ _ _ _ H) then idtac else apply (fapply_equiv_r_T _ _ _ _ H)
     end
+  
+  (* Quantifiers are instantiated with evars *)
+  | ∀ _ => eapply AllE in H; simpl_subst H; fapply_without_quant H
+
+  (* If we don't find something useful, try unfolding definitions to 
+   * check if there is something hidden underneath. Also perform 
+   * simplification and fix names if the definition does something 
+   * nasty. *)
+  | _ =>
+    match type of H with ?r => idtac r end;
+    progress custom_unfold; simpl_subst H;
+    custom_unfold; (* Unfold again because [simpl_subst] folds *)
+    fapply_without_quant H;
+    custom_fold
   end.
 
-Ltac instantiate_evars H := repeat eapply AllE in H.
-Tactic Notation "is_hyp" hyp(H) := idtac.
+Ltac instantiate_evars H := repeat eassert (H := H _); repeat eapply AllE in H.
+(* Tactic Notation "is_hyp" hyp(H) := idtac. *)
+Ltac is_hyp H := match type of H with ?t => match type of t with Prop => idtac end end.
 
 (* Check wether T is a hypothesis, a context index, a context formula
  * or a context name and put it into hypothesis H. *)
@@ -900,19 +916,17 @@ Ltac turn_into_hypothesis T H contxt :=
  * tactic adds goals for `P1, P2, ..., Pn` and specializes `H`. *)
 Ltac assert_premises H :=
   match type of H with
-  | _ ⊢ _ => idtac
-  | _ ⊩ _ => idtac
-  | pm _ _ => idtac
-  | tpm _ _ => idtac
   | ?A -> ?B => 
       let H' := fresh "H" in assert A as H';
       [|specialize (H H'); clear H'; assert_premises H ]
+  | forall _, _ => eassert (H := H _); assert_premises H
+  | _ => idtac
   end.
 
 Ltac feapply' T A := fun contxt =>
   let H := fresh "H" in
   turn_into_hypothesis T H contxt;
-  (* If `H` containes has further Coq premises before the formula 
+  (* If `H` contains further Coq premises before the formula 
    * statement, we add them as additional goals. *)
   assert_premises H;
   (* Only try here, because it would fail on these additional goals. *)
@@ -932,7 +946,7 @@ Ltac feapply' T A := fun contxt =>
 Ltac fapply' T A contxt :=
   let H := fresh "H" in
   turn_into_hypothesis T H contxt;
-  (* If `H` containes has further Coq premises before the formula 
+  (* If `H` containe further Coq premises before the formula 
    * statement, we add them as additional goals. *)
   assert_premises H;
   (* Only try here, because it would fail on these additional goals. *)
@@ -1455,11 +1469,14 @@ Next Obligation. Admitted.
 Lemma ZF_sub_pair' x y x' y' :
   ZF ⊢ (x ≡ x' --> y ≡ y'--> sub ({x; y}) ({x'; y'})).
 Proof.
-  fstart. fintros "H1" "H2" z. fintro "H3". feapply ax_pair.
-  assert (ZF ⊢ ax_pair) by ctx. fspecialize (H y x z). fdestruct H as "[H4 H5]".
-  assert (ZF ⊢ ax_pair) by ctx. fspecialize (H0 y' x' z). fdestruct H0 as "[H6 H7]".
-  fapply "H7". frewrite <- "H1". frewrite <- "H2". fapply "H4". ctx.
-Qed. 
+Admitted.
+
+Lemma ZF_eq_pair' x y x' y' :
+  ZF ⊢ (x ≡ x' --> y ≡ y'--> {x; y} ≡ {x'; y'}).
+Proof.
+  fstart. fintros "H1" "H2". fapply ax_ext. fintros z.
+  - fapply ZF_sub_pair'.
+Qed.
 
 End Test. *)
 
