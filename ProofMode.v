@@ -1140,33 +1140,59 @@ Class Leibniz (Σ_funcs : funcs_signature) (Σ_preds : preds_signature) :=
   eq s t := @atom Σ_funcs Σ_preds _ Eq_pred (cast eq_binary (Vector.cons term s 1 (Vector.cons term t 0 (Vector.nil term)))) ;
 
   Axioms : list form ;
-  sym `{peirce} : Axioms ⊢ ∀ ∀ (eq ($0) ($1) --> eq ($1) ($0)) ;
-  sym_T `{peirce} T : Axioms ⊏ T ->  Axioms ⊢ ∀ ∀ (eq ($0) ($1) --> eq ($1) ($0)) ;
+  Axioms_T : theory ;
+  (* Axioms_T_closed : closed_theory Axioms_T ; *)
+  (* sym `{peirce} : Axioms ⊢ ∀ ∀ (eq ($0) ($1) --> eq ($1) ($0)) ; *)
+  sym_T `{peirce} T : Axioms ⊏ T ->  T ⊩ ∀ ∀ (eq ($0) ($1) --> eq ($1) ($0)) ;
   leibniz `{peirce} A phi t t' : Axioms <<= A -> A ⊢ eq t t' -> A ⊢ phi[t..] -> A ⊢ phi[t'..] ;
-  leibniz_T `{peirce} T phi t t' : Axioms ⊏ T -> T ⊩ eq t t' -> T ⊩ phi[t..] -> T ⊩ phi[t'..]
+  leibniz_T `{peirce} T phi t t' : Axioms_T ⊑ T -> T ⊩ eq t t' -> T ⊩ phi[t..] -> T ⊩ phi[t'..]
 }.
 
 
-(* Lemma eq_subst_help `{funcs_signature} f y t1 t2 (e : 2 = y) :
+Lemma eq_subst_help `{funcs_signature} f y t1 t2 (e : 2 = y) :
   Vector.map f (cast e (Vector.cons term t1 1 (Vector.cons term t2 0 (Vector.nil term)))) = cast e (@Vector.map term term f _ (Vector.cons term t1 1 (Vector.cons term t2 0 (Vector.nil term)))).
 Proof.
   destruct e. reflexivity.
 Qed.
 
 Lemma eq_subst `{L : Leibniz} t1 t2 s :
-  (eq t1 t2)[s] = eq (t1[s]) (t2[s]).
+  (eq t1 t2)[s] = eq (t1`[s]) (t2`[s]).
 Proof.
   cbn. rewrite eq_subst_help. cbn. reflexivity.
 Qed.
 
-Lemma symm' `{funcs_signature, preds_signature, peirce, Leibniz} s t :
-  Axioms ⊢ eq s t -> Axioms ⊢ eq t s.
+Lemma sym `{Leibniz, peirce} :
+  Axioms ⊢ ∀ ∀ (eq $0 $1 --> eq $1 $0).
 Proof.
-  intros. enough (Axioms ⊢ eq (($0)[t..]) (s[↑][t..])) as X by now rewrite subst_term_shift in X.
-  pose (Axioms ⊢ (eq ($0) (s[↑]))[t..]). cbn in P.
-  simpl_subst.
-  cbn. *)
+  intros. fintros s t. repeat (rewrite eq_subst_help; cbn).
+  change (Axioms ⊢ (eq t s`[↑]`[t..] --> eq s`[↑]`[t..] t)). simpl_subst.
+  fintro. enough ((eq t s :: Axioms) ⊢ (eq t s --> eq s t)). eapply IE. apply H1. ctx.
+  enough ((eq t s::Axioms) ⊢ (eq t`[↑]`[s..] $0`[s..] --> eq $0`[s..] t`[↑]`[s..])) as X by now rewrite subst_term_shift in X.
+  enough ((eq t s::Axioms) ⊢ (eq t`[↑] $0 --> eq $0 t`[↑])[s..]) by now rewrite <- ! eq_subst.
+  eapply leibniz. firstorder. apply Ctx. now left. cbn. repeat (rewrite eq_subst_help; cbn).
+  change ((eq t s :: Axioms) ⊢ (eq t`[↑]`[t..] t --> eq t t`[↑]`[t..])).
+  rewrite subst_term_shift.
+  apply II. apply Ctx. now left.
+Qed.
 
+(* Lemma sym_T `{peirce, Leibniz} :
+  Axioms_T ⊩ ∀ ∀ (eq ($0) ($1) --> eq ($1) ($0)).
+Proof.
+  apply AllI, AllI.
+  pose (T' := mapT (subst_form ↑) (mapT (subst_form ↑) Axioms_T)).
+  pose (t := $0). pose (s := $1).
+  fintro. enough ((T' ⋄ eq t s) ⊩ (eq t s --> eq s t)) as X. eapply IE. apply X.
+  apply Ctx. now right.
+  enough ((T' ⋄ eq t s) ⊩ (eq t`[↑]`[s..] $0`[s..] --> eq $0`[s..] t`[↑]`[s..])) as X by now rewrite subst_term_shift in X.
+  enough ((T' ⋄ eq t s) ⊩ (eq t`[↑] $0 --> eq $0 t`[↑])[s..]) by now rewrite <- ! eq_subst.
+  eapply leibniz_T.
+  { intros phi H2. left. exists phi. split. exists phi. split. now apply H2.
+    all: apply subst_closed; now apply Axioms_T_closed. }
+  apply Ctx. now right.
+  cbn. repeat (rewrite eq_subst_help; cbn).
+  change ((T' ⋄ eq t s) ⊩ (eq t t --> eq t t)).
+  apply II. ctx.
+Qed. *)
 
 Fixpoint up_n `{funcs_signature} n sigma := match n with
 | 0 => sigma

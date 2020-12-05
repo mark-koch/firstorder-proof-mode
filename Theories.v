@@ -6,6 +6,13 @@ Require Import Equations.Equations Equations.Prop.DepElim.
 
 
 
+Definition subset_T `{funcs_signature, preds_signature} (T1 T2 : theory) := forall (phi : form), phi t∈ T1 -> phi t∈ T2.
+Infix "⊑" := subset_T (at level 20).
+
+Definition extend `{funcs_signature, preds_signature} T (phi : form) := fun psi => T psi \/ psi = phi.
+Infix "⋄" := extend (at level 20).
+
+
 Section Theories.
 
 Context {Σ_funcs : funcs_signature}.
@@ -14,13 +21,25 @@ Context {Σ_preds : preds_signature}.
 Context  {p : peirce}.
 
 
-Definition subset_T (T1 T2 : theory) := forall (phi : form), phi ∈ T1 -> phi ∈ T2.
-Infix "⊑" := subset_T (at level 20).
-
-Definition extend T (phi : form) := fun psi => T psi \/ psi = phi.
-Infix "⋄" := extend (at level 20).
-
 Definition mapT (f : form -> form) (T : theory) : theory := fun phi => exists psi, T psi /\ f psi = phi.
+
+
+Inductive unused_term (n : nat) : term -> Prop :=
+| uft_var m : n <> m -> unused_term n ($m)
+| uft_Func F v : (forall t, vec_in t v -> unused_term n t) -> unused_term n (func F v).
+
+Inductive unused (n : nat) : form -> Prop :=
+| uf_Fal : unused n fal
+| uf_Pred P v : (forall t, vec_in t v -> unused_term n t) -> unused n (atom P v)
+| uf_Bin op phi psi : unused n phi -> unused n psi -> unused n (bin op phi psi)
+| uf_Quant op phi : unused (S n) phi -> unused n (quant op phi).
+
+Definition closed_theory (T : theory) := forall phi, phi t∈ T -> closed phi = true.
+
+Lemma subst_closed s phi :
+  closed phi = true -> phi[s] = phi.
+Proof.
+Admitted.
 
 
 Theorem WeakT A B phi :
@@ -36,7 +55,7 @@ Lemma contains_nil T :
 Proof. intuition. now exfalso. Qed.
 
 Lemma contains_cons a A T :
-  a ∈ T -> A ⊏ T -> (a :: A) ⊏ T.
+  a t∈ T -> A ⊏ T -> (a :: A) ⊏ T.
 Proof. intros ? ? ? []; subst; intuition. Qed.
 
 Lemma contains_cons2 a A T :
@@ -48,11 +67,11 @@ Lemma contains_app A B T :
 Proof. intros ? ? ? [] % in_app_or; intuition. Qed.
 
 Lemma contains_extend1 phi T :
-  phi ∈ (T ⋄ phi).
+  phi t∈ (T ⋄ phi).
 Proof. now right. Qed.
 
 Lemma contains_extend2 phi psi T :
-  phi ∈ T -> phi ∈ (T ⋄ psi).
+  phi t∈ T -> phi t∈ (T ⋄ psi).
 Proof. intros ?. now left. Qed.
 
 Lemma contains_extend3 A T phi :
@@ -117,7 +136,7 @@ Lemma map_shift_up_down_contains A T :
   (A ⊏ mapT (subst_form ↑) T) -> map (subst_form shift_down) A ⊏ T.
 Proof.
   intros H1. induction A. easy. intros f H. destruct H as [<-|].
-  - destruct (H1 a) as [f [H2 <-]]. now left. change (f[↑][shift_down] ∈ T). 
+  - destruct (H1 a) as [f [H2 <-]]. now left. change (f[↑][shift_down] t∈ T). 
     enough (f[↑][shift_down] = f) as -> by easy. 
     rewrite subst_comp. now apply subst_id. 
   - firstorder.
@@ -201,7 +220,7 @@ Proof.
 Qed.
 
 Lemma T_Ctx T phi :
-  phi ∈ T -> T ⊩ phi.
+  phi t∈ T -> T ⊩ phi.
 Proof.
   intros H. exists (phi::nil). split.
   intros psi H2. now assert (phi = psi) as -> by firstorder.

@@ -2,6 +2,7 @@ Require Import FOL.
 Require Import Deduction.
 Require Import Tarski.
 Require Import ProofMode.
+Require Import Theories.
 Require Import PA.
 Require Import Equations.Equations Equations.Prop.DepElim.
 Require Import String.
@@ -60,10 +61,10 @@ Qed.
 Program Instance PA_Leibniz : Leibniz PA_funcs_signature PA_preds_signature.
 Next Obligation. exact Eq. Defined.
 Next Obligation. exact FA. Defined.
-Next Obligation. fintros. fapply ax_sym. ctx. Defined.
-Next Obligation. fintros. fapply ax_sym. ctx. Defined.
+Next Obligation. exact (fun phi => phi el FA). Defined.
+Next Obligation. apply Ctx. firstorder. Admitted.
 Next Obligation. Admitted.
-Next Obligation. Admitted. 
+Next Obligation. Admitted.
 
 
 

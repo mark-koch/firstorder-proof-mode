@@ -9,6 +9,7 @@ Tarski.v
 VectorTech.v
 Deduction.v
 PA.v
+ZF.v
 Hoas.v
 Theories.v
 ProofMode.v

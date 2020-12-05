@@ -179,8 +179,8 @@ Section Theories.
 
 End Theories.
 
-Notation "phi ∈ T" := (in_theory T phi) (at level 70).
-Notation "A ⊏ T" := (forall phi, phi el A -> phi ∈ T) (at level 70).
+Notation "phi t∈ T" := (in_theory T phi) (at level 70).
+Notation "A ⊏ T" := (forall phi, phi el A -> phi t∈ T) (at level 70).
 Definition tprv {sig1 sig2 p} T phi := (exists A, A ⊏ T /\ @prv sig1 sig2 p A phi).
 
 Notation "T ⊩ phi" := (tprv T phi) (at level 30).
@@ -225,7 +225,7 @@ Section Soundness.
   Qed.
 
   Definition tvalid T phi :=
-    forall D (I : interp D) rho, (forall phi, phi ∈ T -> rho ⊨ phi) -> rho ⊨ phi.
+    forall D (I : interp D) rho, (forall phi, phi t∈ T -> rho ⊨ phi) -> rho ⊨ phi.
 
   Lemma tSoundness T phi :
     T ⊩I phi -> tvalid T phi.
