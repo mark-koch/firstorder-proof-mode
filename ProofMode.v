@@ -192,7 +192,7 @@ Ltac map_ltac A f :=
   | cons ?x ?A' => let x' := f x in let A'' := map_ltac A' f in constr:(cons x' A'')
   | ccons ?s ?x ?A' => let x' := f x in let A'' := map_ltac A' f in constr:(ccons s x' A'')
   | tcons ?s ?x ?A' => let x' := f x in let A'' := map_ltac A' f in constr:(tcons s x' A'')
-  | Vector.cons ?x ?A' => let x' := f x in let A'' := map_ltac A' f in constr:(Vector.cons x' A'')
+  | @Vector.cons _ ?x _ ?A' => let x' := f x in let A'' := map_ltac A' f in constr:(@Vector.cons _ x' _ A'')
   end.
 
 (* Finds the first name of form `base`, `base0`, `base1`, ... thats not 
