@@ -666,6 +666,14 @@ Ltac fintro_ident x :=
     simpl_context_mapT;
     simpl_subst;
     update_binder_names
+  | _ =>
+    (* Unfold definitions to check if there are hidden ∀ underneath. 
+     * Also perform simplification and fix names if the definition
+     * does something nasty. *)
+    progress custom_unfold; simpl_subst; try update_binder_names;
+    custom_unfold; (* Unfold again because [simpl_subst] folds *)
+    fintro_ident x;
+    custom_fold
   end.
 
 Ltac fintro_pat' pat :=
@@ -707,6 +715,14 @@ Ltac fintro_pat' pat :=
       | [ |- @tpm _ _ ?p ?C (named_quant All _ ?t) ] => let x := fresh "x" in fintro_ident x
       | [ |- @pm _ _ ?p ?C (?s --> ?t) ] => apply II; let name := name_from_pattern C id in change (@pm _ _ p (ccons name s C) t)
       | [ |- @tpm _ _ ?p ?C (?s --> ?t) ] => apply II; let name := name_from_pattern C id in change (@tpm _ _ p (tcons name s C) t)
+      | _ =>
+        (* Unfold definitions to check if there are hidden ∀ underneath. 
+         * Also perform simplification and fix names if the definition
+         * does something nasty. *)
+        progress custom_unfold; simpl_subst; try update_binder_names;
+        custom_unfold; (* Unfold again because [simpl_subst] folds *)
+        fintro_pat' pat;
+        custom_fold
       end
   end.
 
@@ -785,29 +801,69 @@ Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) constr(x3) := 
  * - Name of a context assumption in proof mode (e.g. [fapply "H2"])
  *)
 
+Section Fapply.
+  Context {Σ_funcs : funcs_signature}.  
+  Context {Σ_preds : preds_signature}.
+  Variable p : peirce.
+
+  Lemma fapply_equiv_l A phi psi :
+    A ⊢ (phi <--> psi) -> A ⊢ phi -> A ⊢ psi.
+  Proof.
+    intros. apply (IE _ phi). eapply CE1. apply H. apply H0.
+  Qed.
+
+  Lemma fapply_equiv_r A phi psi :
+    A ⊢ (phi <--> psi) -> A ⊢ psi -> A ⊢ phi.
+  Proof.
+    intros. apply (IE _ psi). eapply CE2. apply H. apply H0.
+  Qed.
+
+  Lemma fapply_equiv_l_T A phi psi :
+    A ⊩ (phi <--> psi) -> A ⊩ phi -> A ⊩ psi.
+  Proof.
+    intros. apply (IE _ phi). eapply CE1. apply H. apply H0.
+  Qed.
+
+  Lemma fapply_equiv_r_T A phi psi :
+    A ⊩ (phi <--> psi) -> A ⊩ psi -> A ⊩ phi.
+  Proof.
+    intros. apply (IE _ psi). eapply CE2. apply H. apply H0.
+  Qed.
+End Fapply.
+
 (* Helper tactics: *)
 
 (* [fapply_without_quant] takes a formula `H : X ⊢ p1 --> p2 --> ... --> pn --> g`
  * without leading quantifiers. It solves the goal `X ⊢ g` by adding subgoals for
- * each premise `p1, p2, ..., pn`. *)
+ * each premise `p1, p2, ..., pn`.
+ * Also supports formulas of Type `H : X ⊢ ... --> (pn <--> g)` or 
+ * `H : X ⊢ ... --> (g <--> pn)` *)
 Ltac fapply_without_quant H :=
   tryif exact H then idtac else
   let Hs := fresh "Hs" in 
   let Ht := fresh "Ht" in 
-  match type of H with
-  | ?A ⊢ (?s --> ?t) => 
-    match goal with [ |- @prv _ _ ?p _ _ ] =>
-      enough (@prv _ _ p A s) as Hs; 
-      [ assert (@prv _ _ p A t) as Ht; 
-        [ apply (IE _ _ _ H Hs) | fapply_without_quant Ht; clear Hs; clear Ht ] 
-      | ]
+  match get_form_hyp H with
+  | ?s --> ?t => 
+    match goal with 
+    | [ |- @prv _ _ ?p ?A _ ] =>
+        enough (@prv _ _ p A s) as Hs; 
+        [ assert (@prv _ _ p A t) as Ht; 
+          [ apply (IE _ _ _ H Hs) | fapply_without_quant Ht; clear Hs; clear Ht ] 
+        | ]
+    | [ |- @tprv _ _ ?p ?A _ ] =>
+        enough (@tprv _ _ p A s) as Hs; 
+        [ assert (@tprv _ _ p A t) as Ht; 
+          [ apply (IE _ _ _ H Hs) | fapply_without_quant Ht; clear Hs; clear Ht ] 
+        | ]
     end
-  | ?A ⊩ (?s --> ?t) => 
-    match goal with [ |- @tprv _ _ ?p _ _ ] =>
-      enough (@tprv _ _ p A s) as Hs; 
-      [ assert (@tprv _ _ p A t) as Ht; 
-        [ apply (IE _ _ _ H Hs) | fapply_without_quant Ht; clear Hs; clear Ht ] 
-      | ]
+  
+  (* Handle application of equivalence. It would be nice to use match
+   * to check which side matches, but it doesn't work because of evars.
+   * Therefore simply try both options. *)
+  | _ <--> _ =>
+    match goal with
+    | [ |- _ ⊢ _] => tryif apply (fapply_equiv_l _ _ _ _ H) then idtac else apply (fapply_equiv_r _ _ _ _ H)
+    | [ |- _ ⊩ _] => tryif apply (fapply_equiv_l_T _ _ _ _ H) then idtac else apply (fapply_equiv_r_T _ _ _ _ H)
     end
   end.
 
@@ -884,16 +940,16 @@ Ltac fapply' T A contxt :=
     fspecialize_list H A; 
     instantiate_evars H; 
     simpl_subst H;
-    let C := get_context_goal in 
+    let C := get_context_goal in
     eapply (Weak _ C) in H; [| firstorder];
     fapply_without_quant H;
     (* [fapply_without_quant] creates the subgoals in the wrong order.
-     * Reverse them to to get the right order: *)
+    * Reverse them to to get the right order: *)
     revgoals;
     (* Evars should only be used for unification in [fapply].
-     * Therefore reject, if there are still evars visible. *)
+    * Therefore reject, if there are still evars visible. *)
     (* TODO: This is not optimal. If the goal contains evars, 
-     * H might still contain evars after unification and we would fail. *)
+    * H might still contain evars after unification and we would fail. *)
     tryif has_evar ltac:(type of H) 
     then fail 3 "Cannot find instance for variable. Try feapply?" 
     else clear H
@@ -1254,7 +1310,13 @@ Ltac frewrite' T A back := fun contxt =>
   fspecialize_list H A; 
   instantiate_evars H; 
   simpl_subst H;
+
+  (* For some reason the match below binds `_t` and `_t'` to terms
+   * with unfolded constants (like `zero` in PA). This messes up
+   * syntactic matching later. Therefore just unfold everything,
+   * do the rewriting and fold back later. *)
   custom_unfold;
+
   match get_form_hyp H with atom ?p (@Vector.cons _ ?_t _ (@Vector.cons _ ?_t' _ (Vector.nil term))) =>
     (* Make sure that we have equality *)
     assert (p = Eq_pred) as _ by reflexivity;
@@ -1363,6 +1425,43 @@ Tactic Notation "frewrite" "<-" "(" constr(T) constr(x1) constr(x2) constr(x3) "
 Ltac fexists x := make_compatible ltac:(fun _ => 
   apply ExI with (t := x); 
   simpl_subst).
+
+
+(* Section Test.
+
+Require Import ZF.
+
+Variable p : peirce.
+
+Definition ax_refl := ∀ $0 ≡ $0.
+Definition ax_sym := ∀ ∀ $1 ≡ $0 --> $0 ≡ $1.
+Definition ax_trans := ∀ ∀ ∀ $2 ≡ $1 --> $1 ≡ $0 --> $2 ≡ $0.
+Definition ax_eq_elem := ∀ ∀ ∀ ∀ $3 ≡ $1 --> $2 ≡ $0 --> $3 ∈ $2 --> $1 ∈ $0.
+
+Definition ZF := ax_ext::ax_eset::ax_pair::ax_union::ax_power::ax_om1::ax_om2::ax_refl::ax_sym::ax_trans::ax_eq_elem::nil.
+
+
+Ltac custom_fold ::= fold sub in *.
+Ltac custom_unfold ::= unfold sub in *.
+
+Program Instance ZF_Leibniz : Leibniz ZF_func_sig ZF_pred_sig.
+Next Obligation. exact equal. Defined.
+Next Obligation. exact ZF. Defined.
+Next Obligation. exact (fun phi => phi el ZF). Defined.
+Next Obligation. Admitted.
+Next Obligation. Admitted.
+Next Obligation. Admitted.
+
+Lemma ZF_sub_pair' x y x' y' :
+  ZF ⊢ (x ≡ x' --> y ≡ y'--> sub ({x; y}) ({x'; y'})).
+Proof.
+  fstart. fintros "H1" "H2" z. fintro "H3". feapply ax_pair.
+  assert (ZF ⊢ ax_pair) by ctx. fspecialize (H y x z). fdestruct H as "[H4 H5]".
+  assert (ZF ⊢ ax_pair) by ctx. fspecialize (H0 y' x' z). fdestruct H0 as "[H6 H7]".
+  fapply "H7". frewrite <- "H1". frewrite <- "H2". fapply "H4". ctx.
+Qed. 
+
+End Test. *)
 
 
 

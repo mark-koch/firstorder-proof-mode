@@ -24,7 +24,7 @@ Notation "∃ Phi" := (quant Ex Phi) (at level 50).
 Notation "A ∧ B" := (bin Conj A B) (at level 41).
 Notation "A ∨ B" := (bin Disj A B) (at level 42).
 Notation "A '-->' B" := (bin Impl A B) (at level 43, right associativity).
-
+Notation "A '<-->' B" := ((A --> B) ∧ (B --> A)) (at level 43).
 
 
 (*** Formula boundedness *)
