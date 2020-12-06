@@ -507,13 +507,21 @@ Tactic Notation "simpl_subst" := (simpl_subst_goal).
 (* Syntactically evaluate `mapT f (T ⋄ a ⋄ b ⋄ c)` to
  * `(mapT f T) ⋄ f a ⋄ f b ⋄ f c` like it would happen using
  * [cbn] for map in normal lists. *)
- Ltac eval_mapT M :=
+Ltac eval_mapT M :=
   match M with
   | mapT ?f (extend ?T ?a) => let T' := eval_mapT (mapT f T) in constr:(extend T' (f a))
   | mapT ?f (tcons ?s ?a ?T) => let T' := eval_mapT (mapT f T) in constr:(tcons s (f a) T')
   | mapT ?f (tblackbox ?T) => constr:(tblackbox (mapT f T))
   | _ => M
   end.
+
+Lemma mapT_step `{s1 : funcs_signature, s2 : preds_signature, p : peirce} f a T1 T2 :
+  subset_T T1 (mapT f T2) -> subset_T (extend T1 (f a)) (mapT f (extend T2 a)).
+Proof.
+  intros H psi H1. destruct H1 as [H1|H1].
+  - destruct (H psi H1) as [rho [H2 H3]]. exists rho. split. now left. assumption.
+  - exists a. split. now right. auto.
+Qed.
 
 (* Replace `mapT f (T ⋄ a ⋄ b ⋄ c)` in the context with 
  * `(mapT f T) ⋄ f a ⋄ f b ⋄ f c`. *)
@@ -661,14 +669,6 @@ Section Fintro.
     $0 = x -> phi = phi[fun n => match n with 0 => x | S n => $(S n) end].
   Proof.
     intros. symmetry. apply subst_id. intros [|]; cbn. now rewrite H. reflexivity.
-  Qed.
-
-  Lemma mapT_step f a T1 T2 :
-    subset_T T1 (mapT f T2) -> subset_T (extend T1 (f a)) (mapT f (extend T2 a)).
-  Proof.
-    intros H psi H1. destruct H1 as [H1|H1].
-    - destruct (H psi H1) as [rho [H2 H3]]. exists rho. split. now left. assumption.
-    - exists a. split. now right. auto.
   Qed.
 
 End Fintro.
@@ -882,10 +882,12 @@ End Fapply.
 (* Helper tactics: *)
 
 (* [fapply_without_quant] takes a formula `H : X ⊢ p1 --> p2 --> ... --> pn --> g`
- * without leading quantifiers. It solves the goal `X ⊢ g` by adding subgoals for
- * each premise `p1, p2, ..., pn`.
+ * without leading quantifiers. It solves the goal `X ⊢ g` by 
+ * adding subgoals for each premise `p1, p2, ..., pn`.
+ *
  * Also supports formulas of Type `H : X ⊢ ... --> (pn <--> g)` or 
  * `H : X ⊢ ... --> (g <--> pn)`.
+ *
  * If ∀-quantifiers occur inbetween, they are instantiated with evars. *)
 Ltac fapply_without_quant H :=
   tryif exact H then idtac else
@@ -1030,6 +1032,137 @@ Tactic Notation "fapply" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := m
 
 
 
+
+
+(*
+ * [fapply (H x1 ... xn) in Hyp ], [feapply (H x1 ... xn) in Hyp]
+ *  
+ * Works on
+ * - Coq hypothesis by name
+ * - Formula in in ND context by index (e.g. [fapply 3 in 0])
+ * - Explicit formula type in the context (e.g. [fapply ax_symm in (x --> y)])
+ * - Name of a context assumption in proof mode (e.g. [fapply "H2" in "H1"])
+ *)
+
+(* Replace the context entry T_old with formula `phi` in 
+ * `H_new : X ⊢ phi` *)
+Ltac replace_context T_old H_new :=
+let C := get_context_goal in
+let phi := get_form_hyp H_new in
+let psi := get_form_goal in
+let X := fresh in
+(enough_compat (phi --> psi) as X by eapply (IE _ _ _ X); apply H_new);
+let C' := match type of T_old with
+  | nat => replace_ltac C T_old phi
+  | form => map_ltac C ltac:(fun f => match f with T_old => phi | ?psi => psi end)
+  | string => match lookup C T_old with
+    | @None => let msg := eval cbn in ("Unknown identifier: " ++ T_old) in fail 4 msg
+    | @Some _ ?n => replace_ltac C n phi
+    end
+end in
+fintro; apply (Weak C'); [| firstorder].
+
+(* Takes two formulas `H_imp : X ⊢ p1 --> ... --> pn --> q`
+ * `H_hyp : X ⊢ pn`. It also takes `T_hyp` which identifies `H_hyp`
+ * in the context.
+ * It changes the assumption `pn` in the context into `q` and adds
+ * additional goals for each premise `p1, p2, ..., pn`.
+ *
+ * Also supports formulas of Type `H_imp : X ⊢ ... --> (pn <--> q)` or 
+ * `H_imp : X ⊢ ... --> (q <--> pn)`.
+ *
+ * If ∀-quantifiers occur inbetween, they are instantiated with evars. *)
+Ltac fapply_in_without_quant_in T_hyp H_imp H_hyp :=
+  match get_form_hyp H_imp with
+  | ?s --> ?t =>
+    let H_hyp' := fresh "H_hyp'" in
+    tryif assert_compat t as H_hyp' by (feapply H_imp; apply H_hyp)
+    then (replace_context T_hyp H_hyp'; clear H_hyp')
+    else ( 
+      (* Try to assert `s` as a goal for the user to prove and
+       * check if we can apply `t`. *)
+      let Hs := fresh "Hs" in
+      let Ht := fresh "Ht" in
+      (enough_compat s as Hs); [
+        (assert_compat t as Ht by apply (IE _ _ _ H_imp Hs));
+        (* replace_context T_imp Ht; *)
+        fapply_in_without_quant_in T_hyp Ht H_hyp;
+        clear Ht; clear Hs
+      | ] )
+  
+  (* Handle application of equivalence. It would be nice to use match
+   * to check which side matches, but it doesn't work because of evars.
+   * Therefore simply try both options. *)
+  | ?s <--> ?t =>
+    let H_hyp' := fresh "H_hyp'" in
+    (tryif assert_compat t as H_hyp' by (feapply H_imp; apply H_hyp) then idtac
+    else assert_compat s as H_hyp' by (feapply H_imp; apply H_hyp));
+    replace_context T_hyp H_hyp'; clear H_hyp'
+  
+  (* Quantifiers are instantiated with evars *)
+  | ∀ _ => instantiate_evars H_imp; fapply_in_without_quant_in T_hyp H_imp H_hyp
+
+  (* If we don't find something useful, try unfolding definitions to 
+    * check if there is something hidden underneath. Also perform 
+    * simplification if the definition does something nasty. *)
+  | _ =>
+    progress custom_unfold; simpl_subst H_imp; simpl_subst H_hyp;
+    custom_unfold; (* Unfold again because [simpl_subst] folds *)
+    fapply_in_without_quant_in T_hyp H_imp H_hyp;
+    custom_fold
+  end.
+
+
+Ltac feapply_in T_imp A T_hyp :=
+  let H_imp := fresh "H_imp" in
+  let H_hyp := fresh "H_hyp" in
+  make_compatible ltac:(fun contxt =>
+    turn_into_hypothesis T_imp H_imp contxt;
+    turn_into_hypothesis T_hyp H_hyp contxt
+  );
+  (* If `H_imp` contains further Coq premises before the  
+   * formula statement, we add them as additional goals. *)
+  assert_premises H_imp;
+  (* Only try here, because it would fail on these additional goals. *)
+  try (
+    fspecialize_list H_imp A;
+    instantiate_evars H_imp;
+    simpl_subst H_imp;
+    let C := get_context_goal in 
+    eapply (Weak _ C) in H_imp; [| firstorder];
+    fapply_in_without_quant_in T_hyp H_imp H_hyp;
+    (* [fapply_in_without_quant_in] creates the subgoals in the wrong order.
+     * Reverse them to to get the right order: *)
+    revgoals;
+    clear H_imp; clear H_hyp
+  ).
+
+Ltac fapply_in T_imp A T_hyp :=
+  feapply_in T_imp A T_hyp;
+  (* Evars should only be used for unification in [fapply].
+   * Therefore reject, if there are still evars visible. *)
+  (* TODO: This is not optimal. If the goal contains evars, 
+   * H might still contain evars after unification and we would fail. *)
+  let C := get_context_goal in
+  let phi := get_form_goal in
+  tryif has_evar C then fail 3 "Cannot find instance for variable. Try feapply?" 
+  else tryif has_evar phi then fail 3 "Cannot find instance for variable. Try feapply?" 
+  else idtac.
+
+Tactic Notation "feapply" constr(T_imp) "in" constr(T_hyp) := feapply_in T_imp constr:([] : list form) T_hyp.
+Tactic Notation "feapply"  "(" constr(T_imp) constr(x1) ")" "in" constr(T_hyp) := feapply_in T_imp constr:([x1] : list form) T_hyp.
+Tactic Notation "feapply" "(" constr(T_imp) constr(x1) constr(x2) ")" "in" constr(T_hyp) := feapply_in T_imp constr:([x1;x2] : list form) T_hyp.
+Tactic Notation "feapply" "(" constr(T_imp) constr(x1) constr(x2) constr(x3) ")" constr(T_hyp) := feapply_in T_imp constr:([x1;x2;x3] : list form) T_hyp.
+
+Tactic Notation "fapply" constr(T_imp) "in" constr(T_hyp) := fapply_in T_imp constr:([] : list form) T_hyp.
+Tactic Notation "fapply"  "(" constr(T_imp) constr(x1) ")" "in" constr(T_hyp) := fapply_in T_imp constr:([x1] : list form) T_hyp.
+Tactic Notation "fapply" "(" constr(T_imp) constr(x1) constr(x2) ")" "in" constr(T_hyp) := fapply_in T_imp constr:([x1;x2] : list form) T_hyp.
+Tactic Notation "fapply" "(" constr(T_imp) constr(x1) constr(x2) constr(x3) ")" constr(T_hyp) := fapply_in T_imp constr:([x1;x2;x3] : list form) T_hyp.
+
+
+
+
+
 (*
  * [fassert phi], [fassert phi as "H"]
  *
@@ -1166,6 +1299,16 @@ Ltac fdestruct'' T pat :=
 Tactic Notation "fdestruct" constr(T) := fdestruct'' T "".
 Tactic Notation "fdestruct" constr(T) "as" constr(pat) := fdestruct'' T pat.
 
+(* Now that we have fdestruct, we can build a fancy [eapply in as] tactic *)
+Tactic Notation "feapply" constr(T_imp) "in" constr(T_hyp) "as" constr(pat) := feapply_in T_imp constr:([] : list form) T_hyp; try fdestruct T_hyp as pat.
+Tactic Notation "feapply"  "(" constr(T_imp) constr(x1) ")" "in" constr(T_hyp) "as" constr(pat) := feapply_in T_imp constr:([x1] : list form) T_hyp; try fdestruct T_hyp as pat.
+Tactic Notation "feapply" "(" constr(T_imp) constr(x1) constr(x2) ")" "in" constr(T_hyp) "as" constr(pat) := feapply_in T_imp constr:([x1;x2] : list form) T_hyp; try fdestruct T_hyp as pat.
+Tactic Notation "feapply" "(" constr(T_imp) constr(x1) constr(x2) constr(x3) ")" constr(T_hyp) "as" constr(pat) := feapply_in T_imp constr:([x1;x2;x3] : list form) T_hyp; try fdestruct T_hyp as pat.
+
+Tactic Notation "fapply" constr(T_imp) "in" constr(T_hyp) "as" constr(pat) := fapply_in T_imp constr:([] : list form) T_hyp; try fdestruct T_hyp as pat.
+Tactic Notation "fapply"  "(" constr(T_imp) constr(x1) ")" "in" constr(T_hyp) "as" constr(pat) := fapply_in T_imp constr:([x1] : list form) T_hyp; try fdestruct T_hyp as pat.
+Tactic Notation "fapply" "(" constr(T_imp) constr(x1) constr(x2) ")" "in" constr(T_hyp) "as" constr(pat) := fapply_in T_imp constr:([x1;x2] : list form) T_hyp; try fdestruct T_hyp as pat.
+Tactic Notation "fapply" "(" constr(T_imp) constr(x1) constr(x2) constr(x3) ")" constr(T_hyp) "as" constr(pat) := fapply_in T_imp constr:([x1;x2;x3] : list form) T_hyp; try fdestruct T_hyp as pat.
 
 
 
