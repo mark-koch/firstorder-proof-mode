@@ -1,0 +1,230 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage[utf8x]{inputenc}
+%\usepackage[left=2.5cm, right=2.5cm, top=2.5cm, bottom=3cm]{geometry}
+
+\usepackage{minted}
+\usemintedstyle{tango}
+\newcommand{\coq}[1]{\mintinline{coq}{#1}}
+ 
+
+\usepackage[framemethod=TikZ]{mdframed}
+\usepackage{mdwlist}
+
+
+\definecolor{colortodo}{rgb}{0.122, 0.435, 0.698}
+\definecolor{colorimportant}{rgb}{0.822, 0.135, 0.198}
+
+
+\newmdenv[innerlinewidth=0.5pt,
+		roundcorner=4pt,
+		linecolor=colorimportant,
+		innerleftmargin=6pt,
+		innerrightmargin=6pt,
+		innertopmargin=6pt,
+		innerbottommargin=4pt] {boximportant}
+		
+\newmdenv[innerlinewidth=0.5pt,
+		roundcorner=4pt,
+		innerleftmargin=6pt,
+		innerrightmargin=6pt,
+		innertopmargin=6pt,
+		innerbottommargin=4pt] {boxremark}
+		
+\newmdenv[innerlinewidth=0.5pt,
+		roundcorner=4pt,
+		innerleftmargin=6pt,
+		innerrightmargin=6pt,
+		innertopmargin=6pt,
+		innerbottommargin=4pt] {boxexample}
+		
+\newcommand{\important}[1]{
+	\vspace{3pt}
+	\begin{boximportant}
+		\textcolor{colorimportant}{\textbf{Important}\\#1}
+	\end{boximportant}}
+
+\newcommand{\remark}[1]{
+	\vspace{3pt}
+	\begin{boxremark}
+		\textbf{Remark}\\#1
+	\end{boxremark}}
+
+\newcommand{\example}[1]{\medskip\\\textbf{Example:}~~#1}
+
+
+
+\title{A first-order logic proof mode}
+\author{Mark Koch}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+
+\section{Introduction}
+
+The goal of this project is to develop a proof mode for first-order logic in Coq, inspired by the Iris proof mode.
+This prototype allows the user to prove statements in a first-order deduction system using many Coq-like tactics while also aiding with context management.
+
+My main contributions are contained in the Coq files \texttt{ProofMode.v} and \texttt{Theories.v}. Example use cases can be found in the demo files \texttt{DemoPA.v} and \texttt{DemoZF.v} for Peano arithmetic and Zermelo–Fraenkel set theory.
+
+The first part of this document contains a brief users guide describing the setup and the available tactics.
+Then we have a look at how the proof mode works internally and ...
+
+
+\section{Users guide}
+
+\subsection{Setup}
+
+To use the proof mode, you need to perform some setup steps beforehand.
+We follow the example for Peano arithmetic in \texttt{DemoPA.v} which can easily be adapted to other systems.
+
+
+\subsection{Overview}
+
+The proof mode is invoked with the tactic \texttt{fstart}. This will drastically change the way your Goal looks like:
+\begin{itemize}
+	\item 
+	The different hypotheses in the context will be displayed one underneath the other just like the Coq context.
+	Also each hypothesis gets a name that can later be used to refer to it.
+	
+	\item 
+	The de Bruijn indices get replaced with names to make goals and hypotheses more readable.
+\end{itemize}
+If you want to leave the proof mode again, simply call the \texttt{fstop} tactic.
+But note that your custom hypothesis names will get lost and cannot be recovered again.
+
+\remark{It is not necessary to start the proof mode if you only want to use the custom tactics described later. These work out of the box on any goal, regardless if the proof mode is started or not. For simple examples this may already be enough, but for more complex proves, starting the proof mode is recommended.}
+
+
+\subsection{Working with the context}
+
+There are many different ways you can refer to a hypothesis in the context:
+\begin{itemize}
+	\item 
+	If you started the proof mode, introduced hypotheses have names in the context. 
+	You can simply give the according string to a tactic to refer to one of these hypotheses. 
+	This is the recommended way to work with the context.
+	\example{\coq{fapply "H3". frewrite "H".}}
+	
+	\item 
+	Alternatively you can directly give a formula that is in the context. 
+	This is useful when working with named axioms.
+	\example{\coq{fapply ax_sym. frewrite (x == y).}}
+	
+	\item 
+	You can also refer to a hypothesis by its index in the context. 
+	This is useful when the proof mode is not active.
+	\example{\coq{fapply 3.}}
+	\important{If parts of your context are folded behind an identifier (like \texttt{FA $\vdash$ ...} in the Peano example, this will not work. The only way is to unfold or give the term directly).}
+	
+	\item 
+	The Coq context itself is also accessible. 
+	If you have a hypothesis \texttt{H : C $\vdash$ ...} you can pass \texttt{H} as an argument.
+\end{itemize}
+
+
+
+
+\subsection{Tactics}
+
+\subsubsection{\ttfamily fintro}
+
+The \texttt{fintro} tactic works analogous to the Coq \texttt{intro} tactic. 
+There is also the \texttt{fintros}-variant for introducing multiple things at once. 
+There are a few  to note:
+\begin{itemize}
+	\item 
+	If you introduce an $\forall$ quantor, you can give an identifier name as a string. 
+	If you do not give an argument or put the string \coq{"?"}, a new name is automatically generated.
+	\example{\coq{fintro "x". fintro. fintro "?".}}
+	
+	\item
+	When introducing implications you can also give a name to the hypothesis as a string. 
+	Note that this has only an effect if the proof mode is active.
+	
+	\item 
+	\texttt{fintros} can take multiple strings. 
+	If you do not give any arguments, everything will get introduced.
+	\example{\coq{fintros "x" "H". fintros.}}
+	
+	\item
+	The tactics also support intro patterns similar to Coq to recursively destruct conjunctions, disjunctions and existentials.
+	\example{\coq{fintros "[H1 ?]" "[H|[x H2]]" "[|]" "[ ]".}}
+\end{itemize}
+\important{Intro pattern parsing is very limited at the moment. You are not allowed to put any extra spaces inside the pattern or it will not be recognized. For example \texttt{"[H1|H2]"} is valid, while \texttt{"[H1 | H2]"} is not. If you leave out names, the only valid forms are \texttt{"[H ]", "[ H]", "[ ]", "[H|]", "[|H]", "[|]"}. This restriction also applies to every other tactic that uses intro patterns.}
+
+
+
+\subsubsection{\ttfamily fapply}
+
+The \texttt{fapply} and \texttt{feapply} tactic works just like in Coq. 
+You can specialize but the tactic is also able to find the correct instantiations of quantifiers automatically. Additional premises may be added as goals for the user to prove.
+\example{\coq{fapply ax_sym. feapply ("H" x z). feapply ("H1" "H2").}}
+
+\medskip\noindent
+You can also apply in Hypotheses with intro pattern support. Application of equivalences is also supported.
+\example{\coq{feapply ax_pair in "H1" as "[H1|H1]".}}
+
+\important{The \texttt{fapply} tactic may not work, if the goal already contains evars. In that case you should use \texttt{feapply} instead.}
+
+
+
+\subsubsection{\ttfamily frewrite}
+
+For rewriting to work, make sure that you followed the corresponding setup steps.
+You need an assumption of the form \texttt{C $\vdash$ x == y} and can rewrite in the goal.
+\example{\coq{frewrite "H". frewrite <- ax_sym.}}
+
+\remark{Rewriting under quantors is supported but you should be aware of the following fact: If you know that \coq{x == y} you actually cannot rewrite in something like \texttt{$\forall$~\coq{x == z}}. Because of the quantor you need shifted occurence of \coq{x} like \texttt{$\forall$~\coq{x`[}$\uparrow$\coq{] == z}}.}
+
+
+\subsubsection{\ttfamily fdestruct}
+
+Destructs conjunctions, disjunctions and existentials with intro pattern support. 
+If no pattern is given, the hypothesis is maximally destructed by auto generated names.
+\example{\coq{fdestruct "H". fdestruct "H" as "[x H]".}}
+
+
+\subsubsection{\ttfamily fassert}
+
+Behaves like the Coq tactic \texttt{assert} and supports intro patterns.
+\example{\coq{fassert (x == y). fassert (a} $\lor$\coq{ b) as "[A|B]" by tac.}}
+
+\important{If you use the \coq{by} syntax with multiple tactics you need to put the whole tactic into parenthesis. \example{\texttt{...; (fassert t by tac1; tac2; tac3); ...}}}
+
+
+\subsubsection{\ttfamily fspecialize}
+
+Can be used to specialize Coq hypothesis.
+This tactic is mostly used internally and does not work on formulas in the context.
+\example{\coq{fspecialize (H x y "H3"). fspecialize H with a, b.}}
+
+
+\subsubsection{\ttfamily ctx}
+
+The \texttt{ctx} tactic solves goals that are contained in the context.
+
+
+\subsubsection{Classical logic}
+
+In a classical system, there is a tactic \texttt{fclassical} that performs a case distinction on a formula.
+You get two cases, one with the formula and one with the negated formula in the context.
+Also supports intro patterns.
+\example{\coq{fclassical phi. fclassical (a} $\land$\coq{ b) as "[A|B]" "H".}}
+
+\medskip\noindent
+The tactic \texttt{fcontradict} allows for proof by contradiction.
+It puts the negated original goal in the context and leaves the user to prove falsity.s
+\example{\coq{fcontradict phi. fcontradict (a} $\land$\coq{ b) as "H".}}
+
+\subsubsection{Other tactics}
+
+There are some other tactics that behave just like their Coq counterpart:
+\begin{center}
+	\texttt{fexfalso, fsplit, fleft, fright, fexists}
+\end{center}
+
+
+
+\end{document}
