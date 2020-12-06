@@ -181,6 +181,28 @@ Ltac nth A n :=
   | S ?n' => match A with _ :: ?A' => nth A' n' | extend ?A' _ => nth A' n' | ccons _ _ ?A' => nth A' n' | tcons _ _ ?T' => nth T' n' end
   end.
 
+Ltac remove A n :=
+  match n with
+  | 0 => match A with _ :: ?A' => A' | extend ?A' _ => A' | ccons _ _ ?A' => A' | tcons _ _ ?A' => A' end
+  | S ?n' => match A with 
+    | ?t :: ?A' => let A'' := remove A' n' in constr:(t::A'') 
+    | extend ?A' ?t => let A'' := remove A' n' in constr:(extend t A'') 
+    | ccons ?s ?t ?A' => let A'' := remove A' n' in constr:(ccons s t A'') 
+    | tcons ?s ?t ?A' => let A'' := remove A' n' in constr:(tcons s t A'') 
+    end
+  end.
+
+Ltac replace_ltac A n phi :=
+  match n with
+  | 0 => match A with _ :: ?A' => constr:(phi::A') | extend ?A' _ => constr:(extend A' phi) | ccons ?s _ ?A' => constr:(ccons s phi A') | tcons ?s _ ?A' => constr:(tcons s phi A') end
+  | S ?n' => match A with 
+    | ?t :: ?A' => let A'' := replace_ltac A' n' phi in constr:(t::A'') 
+    | extend ?A' ?t => let A'' := replace_ltac A' n' phi in constr:(extend t A'') 
+    | ccons ?s ?t ?A' => let A'' := replace_ltac A' n' phi in constr:(ccons s t A'') 
+    | tcons ?s ?t ?A' => let A'' := replace_ltac A' n' phi in constr:(tcons s t A'') 
+    end
+  end.
+
 Ltac map_ltac A f :=
   match A with
   | nil => constr:(nil)
@@ -242,6 +264,7 @@ Ltac create_context A := let x := create_context' A in match x with (?c, _) => c
 
 
 
+
 (** Variable names utilities: *)
 
 Definition named_quant {fsig psig ops} op (x : string) phi := @quant fsig psig ops op phi.
@@ -298,6 +321,9 @@ Ltac update_binder_names := unfold named_quant; unfold named_var; add_binder_nam
 
 
 
+
+(** Proof Mode: *)
+
 Notation "" := cnil (only printing).
 Notation "A" := (cblackbox A) (at level 1, only printing, format " A").
 Notation "C name : phi" := (ccons name phi C)
@@ -345,6 +371,10 @@ Ltac fstop :=
   unfold named_quant; unfold named_var.
 
 
+
+
+(** Compatability tactics: *)
+
 (* All the tactics defined below work with the original `prv` type.
  * The following tactic lifts them to be compatible with `pm`.
  *
@@ -375,10 +405,169 @@ Ltac make_compatible tac :=
   end.
 
 
+(* [assert] and [enough] that are compatible with all proof modes.
+ * This way we can avoid matching on the goal each time. *)
+Ltac assert_compat' phi H :=
+  match goal with
+  | [ |- ?C ⊢ _ ] => assert (@prv _ _ _ C phi) as H
+  | [ |- ?C ⊩ _ ] => assert (@tprv _ _ _ C phi) as H
+  | [ |- @pm _ _ _ ?C _ ] => assert (@pm _ _ _ C phi) as H
+  | [ |- @tpm _ _ _ ?C _ ] => assert (@tpm _ _ _ C phi) as H
+  end.
+Tactic Notation "assert_compat" constr(phi) := let H := fresh in assert_compat' phi H.
+Tactic Notation "assert_compat" constr(phi) "as" ident(H) := assert_compat' phi H.
+Tactic Notation "assert_compat" constr(phi) "by" tactic(tac) := let H := fresh in assert_compat' phi H; [tac|].
+Tactic Notation "assert_compat" constr(phi) "as" ident(H) "by" tactic(tac) := assert_compat' phi H; [tac|].
+
+Ltac enough_compat' phi H :=
+  match goal with
+  | [ |- ?C ⊢ _ ] => enough (@prv _ _ _ C phi) as H
+  | [ |- ?C ⊩ _ ] => enough (@tprv _ _ _ C phi) as H
+  | [ |- @pm _ _ _ ?C _ ] => enough (@pm _ _ _ C phi) as H
+  | [ |- @tpm _ _ _ ?C _ ] => enough (@tpm _ _ _ C phi) as H
+  end.
+Tactic Notation "enough_compat" constr(phi) := let H := fresh in enough_compat' phi H.
+Tactic Notation "enough_compat" constr(phi) "as" ident(H) := enough_compat' phi H.
+Tactic Notation "enough_compat" constr(phi) "by" tactic(tac) := let H := fresh in enough_compat' phi H; [tac|].
+Tactic Notation "enough_compat" constr(phi) "as" ident(H) "by" tactic(tac) := enough_compat' phi H; [tac|].
 
 
-(* Intro pattern parsing 
- * This gets its own section to avoid importing Ascii globally. *)
+(* Return the context of the goal or a hypothesis *)
+Ltac get_context_goal :=
+  match goal with
+  | [ |- ?C ⊢ _ ] => C
+  | [ |- ?C ⊩ _ ] => C
+  | [ |- pm ?C _ ] => C
+  | [ |- tpm ?C _ ] => C
+  end.
+Ltac get_context_hyp H :=
+  match type of H with
+  | ?C ⊢ _ => C
+  | ?C ⊩ _ => C
+  | pm ?C _ => C
+  | tpm ?C _ => C
+  end.
+Tactic Notation "get_context" := get_context_goal.
+Tactic Notation "get_context" hyp(H) := get_context_hyp H.
+
+(* Return the formula inside the goal or a hypothesis *)
+Ltac get_form_goal :=
+  match goal with
+  | [ |- _ ⊢ ?phi ] => phi
+  | [ |- _ ⊩ ?phi ] => phi
+  | [ |- pm _ ?phi ] => phi
+  | [ |- tpm _ ?phi ] => phi
+  end.
+Ltac get_form_hyp H :=
+  match type of H with
+  | _ ⊢ ?phi => phi
+  | _ ⊩ ?phi => phi
+  | pm _ ?phi => phi
+  | tpm _ ?phi => phi
+  end.
+Tactic Notation "get_form" := get_form_goal.
+Tactic Notation "get_form" hyp(H) := get_form_hyp H.
+
+
+
+
+(** Simplification: *)
+
+(* Spimplify terms that occur during specialization *)
+Ltac simpl_subst_hyp H :=
+  cbn in H;
+  repeat match type of H with
+  | context C[S >> var] => let H' := context C[↑] in change H' in H
+  end;
+  try rewrite !up_term in H;
+  try rewrite !subst_term_shift in H;
+  (* Turn `(S >> var) 4` into `$5`. TODO: Find a better way to do this. *)
+  unfold ">>";
+  (* Domain specific simplifications: *)
+  custom_fold;
+  custom_simpl.
+
+Ltac simpl_subst_goal :=
+  cbn;
+  repeat match goal with
+  | [ |- context C[S >> var] ] => let G := context C[↑] in change G
+  end;
+  try rewrite !up_term;
+  try rewrite !subst_term_shift;
+  (* Turn `(S >> var) 4` into `$5`. TODO: Find a better way to do this. *)
+  unfold ">>";
+  (* Domain specific simplifications: *)
+  custom_fold;
+  custom_simpl.
+
+Tactic Notation "simpl_subst" hyp(H) := (simpl_subst_hyp H).
+Tactic Notation "simpl_subst" := (simpl_subst_goal).
+
+
+(* Syntactically evaluate `mapT f (T ⋄ a ⋄ b ⋄ c)` to
+ * `(mapT f T) ⋄ f a ⋄ f b ⋄ f c` like it would happen using
+ * [cbn] for map in normal lists. *)
+ Ltac eval_mapT M :=
+  match M with
+  | mapT ?f (extend ?T ?a) => let T' := eval_mapT (mapT f T) in constr:(extend T' (f a))
+  | mapT ?f (tcons ?s ?a ?T) => let T' := eval_mapT (mapT f T) in constr:(tcons s (f a) T')
+  | mapT ?f (tblackbox ?T) => constr:(tblackbox (mapT f T))
+  | _ => M
+  end.
+
+(* Replace `mapT f (T ⋄ a ⋄ b ⋄ c)` in the context with 
+ * `(mapT f T) ⋄ f a ⋄ f b ⋄ f c`. *)
+Ltac simpl_context_mapT :=
+  match goal with 
+  | [ |- tprv ?T ?phi ] =>
+      let T' := eval_mapT T in
+      let X := fresh in
+      enough (tprv T' phi) as X; [ 
+        eapply Weak; [now apply X | repeat apply mapT_step; apply subset_refl ]
+      |]
+  | [ |- tpm ?T ?phi ] =>
+      let T' := eval_mapT T in
+      let X := fresh in
+      enough (tpm T' phi) as X; [ 
+        eapply Weak; [now apply X | repeat apply mapT_step; apply subset_refl ]
+      |]
+  end.
+
+
+
+
+
+
+
+
+
+(** End user proof tactics: *)
+
+Ltac ctx := make_compatible ltac:(fun _ => apply Ctx; firstorder).
+
+Ltac fexfalso := make_compatible ltac:(fun _ => apply Exp).
+Ltac fsplit := make_compatible ltac:(fun _ => apply CI).
+Ltac fleft := make_compatible ltac:(fun _ => apply DI1).
+Ltac fright := make_compatible ltac:(fun _ => apply DI2).
+
+
+
+
+(* 
+ * [fintro], [fintros] 
+ * 
+ * Similar to Coq. Identifiers need to be given as strings (e.g. 
+ * [fintros "H1" "H2"]). With "?" you can automatically generate
+ * a name (e.g. [fintros "?" "H"]).
+ * 
+ * Now also handles intro patterns! For now unneccessary spaces
+ * are not alowed in intro patterns. E.g. instead of "[H1 | H2]",
+ * write "[H1|H2]".
+ *)
+
+
+(* Intro pattern parsing. This gets its own section to avoid 
+ * importing Ascii globally. *)
 Section IntroPattern.
   Import Ascii.
 
@@ -421,119 +610,6 @@ Section IntroPattern.
   Definition parse_intro_pattern s := fst (parse_intro_pattern' s 100).
 
 End IntroPattern.
-
-
-
-
-
-(* Spimplify terms that occur during specialization *)
-Ltac simpl_subst_hyp H :=
-  cbn in H;
-  (* repeat match type of H with
-  | context C[subst_term ?s ?t] => let H' := context C[t[s]] in change H' in H
-  end;
-  repeat match type of H with
-  | context C[subst_form ?s ?t] => let H' := context C[t[s]] in change H' in H
-  end; *)
-  repeat match type of H with
-  | context C[S >> var] => let H' := context C[↑] in change H' in H
-  end;
-  try rewrite !up_term in H;
-  try rewrite !subst_term_shift in H;
-  (* Turn `(S >> var) 4` into `$5`. TODO: Find a better way to do this. *)
-  unfold ">>";
-  (* Domain specific simplifications: *)
-  custom_fold;
-  custom_simpl.
-
-Ltac simpl_subst_goal :=
-  cbn;
-  (* repeat match goal with
-  | [ |- context C[subst_term ?s ?t] ] => let G := context C[t[s]] in change G
-  end;
-  repeat match goal with
-  | [ |- context C[subst_form ?s ?t] ] => let G := context C[t[s]] in change G
-  end; *)
-  repeat match goal with
-  | [ |- context C[S >> var] ] => let G := context C[↑] in change G
-  end;
-  try rewrite !up_term;
-  try rewrite !subst_term_shift;
-  (* Turn `(S >> var) 4` into `$5`. TODO: Find a better way to do this. *)
-  unfold ">>";
-  (* Domain specific simplifications: *)
-  custom_fold;
-  custom_simpl.
-
-Tactic Notation "simpl_subst" hyp(H) := (simpl_subst_hyp H).
-Tactic Notation "simpl_subst" := (simpl_subst_goal).
-
-
-(* Return the context of the goal or a hypothesis *)
-Ltac get_context_goal :=
-  match goal with
-  | [ |- ?C ⊢ _ ] => C
-  | [ |- ?C ⊩ _ ] => C
-  | [ |- pm ?C _ ] => C
-  | [ |- tpm ?C _ ] => C
-  end.
-Ltac get_context_hyp H :=
-  match type of H with
-  | ?C ⊢ _ => C
-  | ?C ⊩ _ => C
-  | pm ?C _ => C
-  | tpm ?C _ => C
-  end.
-Tactic Notation "get_context" := get_context_goal.
-Tactic Notation "get_context" hyp(H) := get_context_hyp H.
-
-
-(* Return the formula inside the goal or a hypothesis *)
-Ltac get_form_goal :=
-  match goal with
-  | [ |- _ ⊢ ?phi ] => phi
-  | [ |- _ ⊩ ?phi ] => phi
-  | [ |- pm _ ?phi ] => phi
-  | [ |- tpm _ ?phi ] => phi
-  end.
-Ltac get_form_hyp H :=
-  match type of H with
-  | _ ⊢ ?phi => phi
-  | _ ⊩ ?phi => phi
-  | pm _ ?phi => phi
-  | tpm _ ?phi => phi
-  end.
-Tactic Notation "get_form" := get_form_goal.
-Tactic Notation "get_form" hyp(H) := get_form_hyp H.
-
-
-
-
-
-(** Basic tactics *)
-
-Ltac ctx := make_compatible ltac:(fun _ => apply Ctx; firstorder).
-
-Ltac fexfalso := make_compatible ltac:(fun _ => apply Exp).
-Ltac fsplit := make_compatible ltac:(fun _ => apply CI).
-Ltac fleft := make_compatible ltac:(fun _ => apply DI1).
-Ltac fright := make_compatible ltac:(fun _ => apply DI2).
-
-
-
-
-
-(* 
- * [fintro], [fintros] 
- * 
- * Similar to Coq. Identifiers need to be given as strings (e.g. 
- * [fintros "H1" "H2"]). With "?" you can automatically generate
- * a name (e.g. [fintros "?" "H"]).
- * 
- * Now also handles intro patterns! For now unneccessary spaces
- * are not alowed in intro patterns. E.g. instead of "[H1 | H2]",
- * write "[H1|H2]".
- *)
 
 Section Fintro.
   Context {Σ_funcs : funcs_signature}.  
@@ -607,34 +683,6 @@ Ltac name_from_pattern C id :=
     end
   end.
 
-(* Syntactically evaluate `mapT f (T ⋄ a ⋄ b ⋄ c)` to
- * `(mapT f T) ⋄ f a ⋄ f b ⋄ f c` like it would happen using
- * [cbn] for map in normal lists. *)
-Ltac eval_mapT M :=
-  match M with
-  | mapT ?f (extend ?T ?a) => let T' := eval_mapT (mapT f T) in constr:(extend T' (f a))
-  | mapT ?f (tcons ?s ?a ?T) => let T' := eval_mapT (mapT f T) in constr:(tcons s (f a) T')
-  | mapT ?f (tblackbox ?T) => constr:(tblackbox (mapT f T))
-  | _ => M
-  end.
-
-(* Replace `mapT f (T ⋄ a ⋄ b ⋄ c)` in the context with 
- * `(mapT f T) ⋄ f a ⋄ f b ⋄ f c`. *)
-Ltac simpl_context_mapT :=
-  match goal with 
-  | [ |- tprv ?T ?phi ] =>
-      let T' := eval_mapT T in
-      let X := fresh in
-      enough (tprv T' phi) as X; [ 
-        eapply Weak; [now apply X | repeat apply mapT_step; apply subset_refl ]
-      |]
-  | [ |- tpm ?T ?phi ] =>
-      let T' := eval_mapT T in
-      let X := fresh in
-      enough (tpm T' phi) as X; [ 
-        eapply Weak; [now apply X | repeat apply mapT_step; apply subset_refl ]
-      |]
-  end.
 
 Ltac fintro_ident x :=
   let H := fresh "H" in
@@ -872,10 +920,8 @@ Ltac fapply_without_quant H :=
 
   (* If we don't find something useful, try unfolding definitions to 
    * check if there is something hidden underneath. Also perform 
-   * simplification and fix names if the definition does something 
-   * nasty. *)
+   * simplification if the definition does something nasty. *)
   | _ =>
-    match type of H with ?r => idtac r end;
     progress custom_unfold; simpl_subst H;
     custom_unfold; (* Unfold again because [simpl_subst] folds *)
     fapply_without_quant H;
@@ -946,7 +992,7 @@ Ltac feapply' T A := fun contxt =>
 Ltac fapply' T A contxt :=
   let H := fresh "H" in
   turn_into_hypothesis T H contxt;
-  (* If `H` containe further Coq premises before the formula 
+  (* If `H` contains further Coq premises before the formula 
    * statement, we add them as additional goals. *)
   assert_premises H;
   (* Only try here, because it would fail on these additional goals. *)
@@ -958,12 +1004,12 @@ Ltac fapply' T A contxt :=
     eapply (Weak _ C) in H; [| firstorder];
     fapply_without_quant H;
     (* [fapply_without_quant] creates the subgoals in the wrong order.
-    * Reverse them to to get the right order: *)
+     * Reverse them to to get the right order: *)
     revgoals;
     (* Evars should only be used for unification in [fapply].
-    * Therefore reject, if there are still evars visible. *)
+     * Therefore reject, if there are still evars visible. *)
     (* TODO: This is not optimal. If the goal contains evars, 
-    * H might still contain evars after unification and we would fail. *)
+     * H might still contain evars after unification and we would fail. *)
     tryif has_evar ltac:(type of H) 
     then fail 3 "Cannot find instance for variable. Try feapply?" 
     else clear H
