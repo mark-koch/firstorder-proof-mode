@@ -674,13 +674,33 @@ Section Fintro.
 End Fintro.
 
 
-Ltac name_from_pattern C id :=
+(* Check if the name `id` doesn't already occur in the context or
+ * create a new name if `id = "?"`. *)
+Ltac hypname_from_pattern C id :=
   match id with 
   | "?" => new_name "H" C
   | _ => match lookup C id with
     | @None => id
     | @Some _ _ => let msg := eval cbn in ("Identifier already used: " ++ id) in fail 7 msg
     end
+  end.
+
+(* For variable names that are introduced with ∀ this gets infinitely
+ * more difficult.
+ * Ltac doesn't have an easy way to convert a Coq string into an identifier.
+ * I found this snippet using Ltac2 that is used in the Iris proof
+ * mode, but doesn't seem that stable. 
+ * See https://github.com/coq/coq/issues/7412 
+ *
+ * Nonetheless I am going to use it, but split up the intro tactic into
+ * ident and hyp intro. I use tactic notation at the end to also support
+ * intro with a 'real' Coq ident instead of a string. This should keep
+ * working if this hack breaks down. *)
+Require Import Ltac2StringIdent.
+Ltac varname_from_pat pat :=
+  match pat with 
+  | patId "?" => fresh "x"
+  | patId ?id => string_to_ident id
   end.
 
 
@@ -724,12 +744,13 @@ Ltac fintro_ident x :=
     custom_fold
   end.
 
+
 Ltac fintro_pat' pat :=
   match pat with
   | patAnd ?p1 ?p2 => (* Existential *)
       make_compatible ltac:(fun C =>
         apply II; eapply ExE; [ apply Ctx; now left |
-          let x := fresh "x" in
+          let x := varname_from_pat p1 in
           let H := fresh "H" in
           edestruct nameless_equiv_ex as [x H];
           apply H; clear H; cbn; simpl_subst; apply -> switch_imp;
@@ -754,15 +775,15 @@ Ltac fintro_pat' pat :=
       [fintro_pat' p1 | fintro_pat' p2]
   | patId ?id =>
       match goal with 
-      | [ |- ?A ⊢ ∀ ?t ] => let x := fresh "x" in fintro_ident x
-      | [ |- ?A ⊩ ∀ ?t ] => let x := fresh "x" in fintro_ident x
+      | [ |- ?A ⊢ ∀ ?t ] => let x := varname_from_pat pat in fintro_ident x
+      | [ |- ?A ⊩ ∀ ?t ] => let x := varname_from_pat pat in fintro_ident x
       | [ |- ?A ⊢ (?s --> ?t) ] => apply II
       | [ |- ?A ⊩ (?s --> ?t) ] => apply II
       (* Special care for intro in proof mode *)
-      | [ |- @pm _ _ ?p ?C (named_quant All _ ?t) ] => let x := fresh "x" in fintro_ident x
-      | [ |- @tpm _ _ ?p ?C (named_quant All _ ?t) ] => let x := fresh "x" in fintro_ident x
-      | [ |- @pm _ _ ?p ?C (?s --> ?t) ] => apply II; let name := name_from_pattern C id in change (@pm _ _ p (ccons name s C) t)
-      | [ |- @tpm _ _ ?p ?C (?s --> ?t) ] => apply II; let name := name_from_pattern C id in change (@tpm _ _ p (tcons name s C) t)
+      | [ |- @pm _ _ ?p ?C (named_quant All _ ?t) ] => let x := varname_from_pat pat in fintro_ident x
+      | [ |- @tpm _ _ ?p ?C (named_quant All _ ?t) ] => let x := varname_from_pat pat in fintro_ident x
+      | [ |- @pm _ _ ?p ?C (?s --> ?t) ] => apply II; let name := hypname_from_pattern C id in change (@pm _ _ p (ccons name s C) t)
+      | [ |- @tpm _ _ ?p ?C (?s --> ?t) ] => apply II; let name := hypname_from_pattern C id in change (@tpm _ _ p (tcons name s C) t)
       | _ =>
         (* Unfold definitions to check if there are hidden ∀ underneath. 
          * Also perform simplification and fix names if the definition
@@ -802,7 +823,8 @@ Tactic Notation "fintros" ident(H1) ident(H2) constr(H3) := fintro_ident H1; fin
 Tactic Notation "fintros" constr(H1) ident(H2) ident(H3) := fintro_pat H1; fintro_ident H2; fintro_ident H3.
 Tactic Notation "fintros" ident(H1) ident(H2) ident(H3) := fintro_ident H1; fintro_ident H2; fintro_ident H3.
 
-
+Tactic Notation "fintros" constr(H1) constr(H2) constr(H3) constr(H4) := fintro_pat H1; fintro_pat H2; fintro_pat H3; fintro_pat H4.
+Tactic Notation "fintros" constr(H1) constr(H2) constr(H3) constr(H4) constr(H5) := fintro_pat H1; fintro_pat H2; fintro_pat H3; fintro_pat H4; fintro_pat H4.
 
 
 

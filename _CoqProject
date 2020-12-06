@@ -12,4 +12,5 @@ PA.v
 ZF.v
 Hoas.v
 Theories.v
+Ltac2StringIdent.v
 ProofMode.v

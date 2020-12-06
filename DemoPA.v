@@ -109,7 +109,7 @@ Abort.
 
 Goal FA ⊢ ∀ ∀ $1 == $0 --> σ $1 == zero ⊕ σ $0.
 Proof.
-  fstart. fintros x y "H". frewrite "H". frewrite (ax_add_zero (σ y)).
+  fstart. fintros "x" "y" "H". frewrite "H". frewrite (ax_add_zero (σ y)).
   fapply ax_refl.
 Qed.
 
@@ -157,7 +157,7 @@ Proof.
   - fassert ax_trans as "trans". ctx.
     fassert ax_add_rec as "add_rec". ctx.
     fassert ax_eq_succ as "eq_succ". ctx.
-    fintros x "IH". feapply "trans".
+    fintros "x" "IH". feapply "trans".
     + fapply "add_rec".
     + fapply "eq_succ". fapply "IH".
 Qed.
@@ -288,8 +288,7 @@ Proof.
     + fexists (σ num y). fapply ax_add_zero.
     + frewrite (ax_mult_zero (σ num y)). frewrite (ax_add_zero zero).
       fapply ax_refl.
-  - fdestruct IHx as "[? [? [[? H1] H2]]]".
-    rename x0 into q. rename x1 into r. rename x2 into k.
+  - fdestruct IHx as "[q [r [[k H1] H2]]]".
     fexists q. fexists (σ r). fsplit.
     + admit.
     + frewrite (ax_add_rec (q ⊗ σ num y) r). fapply ax_eq_succ. fapply "H2".

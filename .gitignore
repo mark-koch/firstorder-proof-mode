@@ -7,3 +7,4 @@ Makefile.coq
 *.vos
 *.aux
 *.cache
+.DS_Store
