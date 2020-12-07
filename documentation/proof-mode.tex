@@ -2,6 +2,9 @@
 \usepackage[utf8x]{inputenc}
 %\usepackage[left=2.5cm, right=2.5cm, top=2.5cm, bottom=3cm]{geometry}
 
+\usepackage{amsmath}
+\usepackage{amssymb}
+
 \usepackage{minted}
 \usemintedstyle{tango}
 \newcommand{\coq}[1]{\mintinline{coq}{#1}}
@@ -11,7 +14,7 @@
 \usepackage{mdwlist}
 
 
-\definecolor{colortodo}{rgb}{0.122, 0.435, 0.698}
+\definecolor{colorimprove}{rgb}{0.122, 0.435, 0.698}
 \definecolor{colorimportant}{rgb}{0.822, 0.135, 0.198}
 
 
@@ -37,6 +40,14 @@
 		innertopmargin=6pt,
 		innerbottommargin=4pt] {boxexample}
 		
+\newmdenv[innerlinewidth=0.5pt,
+		roundcorner=4pt,
+		linecolor=colorimprove,
+		innerleftmargin=6pt,
+		innerrightmargin=6pt,
+		innertopmargin=6pt,
+		innerbottommargin=4pt] {boximprove}
+		
 \newcommand{\important}[1]{
 	\vspace{3pt}
 	\begin{boximportant}
@@ -50,6 +61,12 @@
 	\end{boxremark}}
 
 \newcommand{\example}[1]{\medskip\\\textbf{Example:}~~#1}
+
+\newcommand{\improve}[1]{
+	\vspace{3pt}
+	\begin{boximprove}
+		\textcolor{colorimprove}{\textbf{TODO}\\#1}
+	\end{boximprove}}
 
 
 
@@ -174,7 +191,8 @@ You can also apply in Hypotheses with intro pattern support. Application of equi
 
 For rewriting to work, make sure that you followed the corresponding setup steps.
 You need an assumption of the form \texttt{C $\vdash$ x == y} and can rewrite in the goal.
-\example{\coq{frewrite "H". frewrite <- ax_sym.}}
+Quantified assumptions are also supported, but your need to give the arguments explicitly
+\example{\coq{frewrite "H". frewrite <- (ax_sym zero x).}}
 
 \remark{Rewriting under quantors is supported but you should be aware of the following fact: If you know that \coq{x == y} you actually cannot rewrite in something like \texttt{$\forall$~\coq{x == z}}. Because of the quantor you need shifted occurence of \coq{x} like \texttt{$\forall$~\coq{x`[}$\uparrow$\coq{] == z}}.}
 
@@ -191,7 +209,7 @@ If no pattern is given, the hypothesis is maximally destructed by auto generated
 Behaves like the Coq tactic \texttt{assert} and supports intro patterns.
 \example{\coq{fassert (x == y). fassert (a} $\lor$\coq{ b) as "[A|B]" by tac.}}
 
-\important{If you use the \coq{by} syntax with multiple tactics you need to put the whole tactic into parenthesis. \example{\texttt{...; (fassert t by tac1; tac2; tac3); ...}}}
+\important{If you use the \texttt{by} syntax with multiple tactics you need to put the whole tactic inside parenthesis. \example{\texttt{...; (fassert t by tac1; tac2; tac3); ...}}}
 
 
 \subsubsection{\ttfamily fspecialize}
@@ -218,12 +236,95 @@ The tactic \texttt{fcontradict} allows for proof by contradiction.
 It puts the negated original goal in the context and leaves the user to prove falsity.s
 \example{\coq{fcontradict phi. fcontradict (a} $\land$\coq{ b) as "H".}}
 
+
 \subsubsection{Other tactics}
 
 There are some other tactics that behave just like their Coq counterpart:
 \begin{center}
 	\texttt{fexfalso, fsplit, fleft, fright, fexists}
 \end{center}
+
+
+
+
+\section{Behind the scenes}
+
+
+\subsection{Proof Mode}
+
+My goal for the proof mode was to have it only active inside the Coq goal.
+Deductions in the context should be displayed in the usual \texttt{C $\vdash$ phi} Notation.
+Therefore simply overriding the \texttt{prv} notation to get the horizontal bar is not sufficient.
+The main trick is to define a function
+$$\coq{pm C phi := prv C phi}$$
+that acts like an alias to the \texttt{prv} type.
+By defining the proof mode notation only for \texttt{pm}, we can manually control when to use it while preserving computational equivalence.
+For the same reason there are aliases for \texttt{cons} and \texttt{nil} on formula lists
+\begin{align*}
+	&\coq{cnil := @nil form} \\
+	&\coq{ccons (s : string) phi C  := @cons form phi C}
+\end{align*}
+They are used to print hypotheses one under another in the context.
+Note the extra string argument \texttt{s} in \texttt{ccons}.
+It is used to give names to the hypotheses.
+Additional there is an alias for complete formula lists
+$$\coq{cblackbox (C : list form) := C}$$
+that is wrapped around lists that are not syntactically known to be nil or cons.
+This is only used to indent these lists nicely in the context.
+For deduction on theories there are also functions \texttt{tpm}, \texttt{tnil}, \texttt{tcons} and \texttt{tblackbox} that are defined in the same way.
+
+\medskip\noindent
+The tactic \texttt{fstart} then simply replaces the \texttt{prv} or \texttt{tprv} with \texttt{pm} or \texttt{tpm} and updates the context accordingly so that the notation gets applied. The \texttt{fstop} tactic unfolds all of these functions to get back to the original type.
+
+Starting the proof mode also replaces de Bruijn indices with named binders. This is done again with the usual trick of defining aliases
+\begin{align*}
+	&\coq{named_quant op (x : string) phi := quant op phi} \\
+	&\coq{named_var n (x : string) := var n}
+\end{align*}
+where \texttt{x} is the display name of the variable.
+The tactic \texttt{update\_binder\_names} ensures that all names are given correctly and should be called if the quantifiers in the goal or the context change.
+
+\improve{When creating the context, automatically generated names are used. Especially when leaving and reentering the proof mode it might be nice to allow the user to pick names themselves. Maybe something like \texttt{fstart with "Hx" "H" "H'"}?.
+\medskip\\
+More importantly, the variable names are also given automatically and change (!) after an intro. This might be very confusing for the user but remembering the names across tactic calls seems difficult, especially considering the compatibility layer. But I think the current solution is still better than de Bruijn indices.}
+
+
+\subsection{Tactic compatibility}
+
+As described in the last section there are four different types of goals our tactics should be able to work with: \texttt{prv}, \texttt{tprv}, \texttt{pm} and \texttt{tpm}.
+It would be very inconvenient if all tactics would need to be written in a way that handles all of these different types.
+Especially maintaining the proof mode aliases would be tedious.
+Therefore there are some compatibility levels that should make writing tactics more easy.
+
+\medskip\noindent
+The most important design decision is, that all tactics available to the user assume that the proof mode is \emph{inactive}.
+Therefore they only have to work on goals of the form \texttt{prv} or \texttt{tprv} (notable exceptions are the \texttt{fintro} and \texttt{fdestruct} tactic, because they need to alter the context).
+To make tactics compatible with the proof mode, there is the higher order tactic \texttt{make\_compatible} that takes a tactic and lifts it to work with the proof mode.
+
+If the proof mode is active, \texttt{make\_compatible} stops it while remembering the context, executes the given tactic and  restores the proof mode to state it has been before.
+Also tactics lifted by \texttt{make\_compatible} get an extra argument where the current context is filled in.
+This way, tactics get access to the hypothesis names that are only present if the proof mode is active.
+
+Note that \texttt{make\_compatible} only works, if the given tactic does not alter the context!
+
+\medskip\noindent
+By adding this compatibility layer, tactics now only need to differentiate between deduction on lists or theories.
+To make this as painless as possible, I defined a type class \texttt{DeductionRules} that includes all of the first-order deduction rules and showed that \texttt{tprv} also satisfies them (see \texttt{Theories.v}).
+There is also a type class for classical deduction rules and Weakening that is satisfied by \texttt{tprv}.
+
+The advantage is, that you can now apply rules like \texttt{II}, \texttt{AllE}, \texttt{Weak} etc. independent of the concrete system you are in and tactics do not need differentiate these cases that would result in a lot of duplicated code.
+There is also the additional benefit that this can easily be extended, for example to deduction on a tuple of a list and a theory.
+
+\medskip\noindent
+On top of that there are the tactics \texttt{get\_context} and \texttt{get\_form} that return the context or the formula of the goal or of a Coq hypothesis.
+This avoids matching on the goal.
+For the same reason there are the tactics \texttt{assert\_comp} and \texttt{enough\_comp} that can be used in place of the original Coq tactic.
+\example{\coq{(assert_comp (phi --> psi) as H by tac)} asserts \texttt{H : C $\vdash$ phi --> psi} or \texttt{H : C $\Vdash$ phi --> psi} depending on the current context \texttt{C} and deduction system.}
+
+
+
+\subsection{Tactic design}
+
 
 
 
