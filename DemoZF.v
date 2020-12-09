@@ -85,6 +85,62 @@ Proof.
   - fleft. frewrite <- "H1". ctx.
   - fright. frewrite <- "H1". ctx.
 Qed.
-  
 
-  
+Lemma ZF_eq_bunion x y x' y' :
+  ZF ⊢ (x ≡ x' --> y ≡ y' --> x ∪ y ≡ x' ∪ y').
+Proof.
+  fstart. fintros "H1" "H2". frewrite "H1". frewrite "H2". fapply ax_refl.
+Qed.
+
+Lemma ZF_sig_el x :
+   ZF ⊢ (x ∈ σ x).
+Proof.
+  fapply ZF_bunion_el'. fright. fapply ax_pair. fleft. fapply ax_refl.
+Qed.
+
+Lemma ZF_eq_sig x y :
+  ZF ⊢ (x ≡ y --> σ x ≡ σ y).
+Proof.
+  fstart. fintros "H". frewrite "H". fapply ax_refl.
+Qed.
+
+Lemma ZF_bunion_el1 x y z :
+  ZF ⊢ (z ∈ x --> z ∈ x ∪ y).
+Proof.
+  fstart. fintros. fapply ax_union. fexists x. fsplit.
+  - fapply ax_pair. fleft. fapply ax_refl.
+  - ctx.
+Qed.
+
+Lemma ZF_bunion_el2 x y z :
+  ZF ⊢ (z ∈ y --> z ∈ x ∪ y).
+Proof.
+  fstart. fintro. fapply ax_union. fexists y. fsplit.
+  fapply ax_pair. fright. fapply ax_refl. ctx.
+Qed.
+
+Lemma bunion_eset x :
+   ZF ⊢ (∅ ∪ x ≡ x).
+Proof.
+  fstart. fapply ax_ext.
+  - fintros "y" "H". fapply ZF_bunion_inv' in "H" as "[|]".
+    + fexfalso. feapply ax_eset. ctx.
+    + ctx.
+  - fintros "y" "H". fapply ZF_bunion_el'. fright. ctx.
+Qed.
+
+Lemma bunion_swap x y z :
+  ZF ⊢ ((x ∪ y) ∪ z ≡ (x ∪ z) ∪ y).
+Proof.
+  fstart. fapply ax_ext.
+  - fintros "a" "H". fapply ZF_bunion_inv' in "H" as "[|]".
+    + fapply ZF_bunion_inv' in "H" as "[H|H]".
+      * fapply ZF_bunion_el'. fleft. fapply ZF_bunion_el'. fleft. ctx.
+      * fapply ZF_bunion_el'. fright. ctx.
+    + fapply ZF_bunion_el'. fleft. fapply ZF_bunion_el'. fright. ctx.
+  - fintros "a" "H". fapply ZF_bunion_inv' in "H" as "[|]".
+    + fapply ZF_bunion_inv' in "H" as "[H|H]".
+      * fapply ZF_bunion_el'. fleft. fapply ZF_bunion_el'. fleft. ctx.
+      * fapply ZF_bunion_el'. fright. ctx.
+    + fapply ZF_bunion_el'. fleft. fapply ZF_bunion_el'. fright. ctx.
+Qed.
