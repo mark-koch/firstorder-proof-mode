@@ -481,6 +481,8 @@ Ltac simpl_subst_hyp H :=
   end;
   try rewrite !up_term in H;
   try rewrite !subst_term_shift in H;
+  try rewrite !up_form in H;
+  try rewrite !subst_shift in H;
   (* Turn `(S >> var) 4` into `$5`. TODO: Find a better way to do this. *)
   unfold ">>";
   (* Domain specific simplifications: *)
@@ -494,6 +496,8 @@ Ltac simpl_subst_goal :=
   end;
   try rewrite !up_term;
   try rewrite !subst_term_shift;
+  try rewrite !up_form;
+  try rewrite !subst_shift;
   (* Turn `(S >> var) 4` into `$5`. TODO: Find a better way to do this. *)
   unfold ">>";
   (* Domain specific simplifications: *)
@@ -754,7 +758,7 @@ Ltac fintro_pat' pat :=
           let H := fresh "H" in
           edestruct nameless_equiv_ex as [x H];
           apply H; clear H; cbn; simpl_subst; apply -> switch_imp;
-          apply Weak with (A := C); [| firstorder] ]
+          apply (Weak C); [| firstorder] ]
       ); 
       fintro_pat' p2
   | patAnd ?p1 ?p2 => (* Conjunction *)
@@ -1280,6 +1284,10 @@ Ltac create_pattern T :=
     let p1 := create_pattern t in
     let p2 := create_pattern s in
     constr:(patOr p1 p2)
+  | ∃ ?t =>
+    let p1 := constr:(patId "?") in
+    let p2 := create_pattern t in
+    constr:(patAnd p1 p2)
   | _ => constr:(patId "?")
   end.
 
@@ -1475,6 +1483,92 @@ Proof.
   apply II. ctx.
 Qed. *)
 
+
+(* Lemmas for rewriting with equivalences *)
+Section FrewriteEquiv.
+  Context {Σ_funcs : funcs_signature}.  
+  Context {Σ_preds : preds_signature}.
+  Context {p : peirce}.
+
+  Lemma frewrite_equiv_bin_l A op phi psi theta :
+    A ⊢ (phi <--> psi) -> A ⊢ (bin op phi theta <--> bin op psi theta).
+  Proof.
+    intros E. fstart. destruct op; fsplit.
+    - fintros "[P T]". fsplit. fapply E. ctx. ctx.
+    - fintros "[P T]". fsplit. fapply E. ctx. ctx.
+    - fintros "[P|T]". fleft. fapply E. ctx. fright. ctx.
+    - fintros "[P|T]". fleft. fapply E. ctx. fright. ctx.
+    - fintros "H" "P". fapply "H". fapply E. ctx.
+    - fintros "H" "P". fapply "H". fapply E. ctx. 
+  Qed.
+
+  Lemma frewrite_equiv_bin_r A op phi psi theta :
+    A ⊢ (phi <--> psi) -> A ⊢ (bin op theta phi <--> bin op theta psi).
+  Proof.
+    intros E. fstart. destruct op; fsplit.
+    - fintros "[P T]". fsplit. ctx. fapply E. ctx.
+    - fintros "[P T]". fsplit. ctx. fapply E. ctx.
+    - fintros "[P|T]". fleft. ctx. fright. fapply E. ctx.
+    - fintros "[P|T]". fleft. ctx. fright. fapply E. ctx.
+    - fintros "H" "P". fapply E. fapply "H". ctx.
+    - fintros "H" "P". fapply E. fapply "H". ctx.
+  Qed.
+
+  Lemma frewrite_equiv_bin_lr A op phi psi theta chi :
+    A ⊢ (phi <--> psi) -> A ⊢ (theta <--> chi) -> A ⊢ (bin op phi theta <--> bin op psi chi).
+  Proof.
+    intros E1 E2. fstart. destruct op; fsplit.
+    - fintros "[P T]". fsplit. fapply E1. ctx. fapply E2. ctx.
+    - fintros "[P C]". fsplit. fapply E1. ctx. fapply E2. ctx.
+    - fintros "[P|T]". fleft. fapply E1. ctx. fright. fapply E2. ctx.
+    - fintros "[P|C]". fleft. fapply E1. ctx. fright. fapply E2. ctx.
+    - fintros "H" "P". fapply E2. fapply "H". fapply E1. ctx.
+    - fintros "H" "P". fapply E2. fapply "H". fapply E1. ctx.
+  Qed.
+
+  Lemma frewrite_equiv_quant A op phi psi :
+    A ⊢ (phi <--> psi) -> A ⊢ (quant op phi[↑] <--> quant op psi[↑]).
+  Proof.
+    intros E. fstart. destruct op; fsplit.
+    - fintros "H" x. fapply E. fapply ("H" $0). (* Give dummy argument to avoid uninstantiated evar *)
+    - fintros "H" x. fapply E. fapply ("H" $0).
+    - fintros "[x H]". apply ExI with (t := x); simpl_subst. fapply E. ctx.
+    - fintros "[x H]". apply ExI with (t := x); simpl_subst. fapply E. ctx.
+  Qed.
+
+  Lemma frewrite_equiv_switch A phi psi :
+    A ⊢ (phi <--> psi) -> A ⊢ (psi <--> phi).
+  Proof.
+    intros E. fdestruct E. fsplit; ctx.
+  Qed.
+
+End FrewriteEquiv.
+
+Ltac contains phi f := match phi with f => idtac | context P [ f ] => idtac end.
+
+(* Solves a goal `A <--> B` if `A` equals `B` up to replacing `phi`
+ * with `psi`. `H` needs to be proof of `C ⊢ phi <--> psi`. *)
+Ltac frewrite_equiv_solve H phi psi :=
+  match get_form_goal with
+  | phi <--> psi => apply H
+  | bin ?op ?l ?r <--> _ => (
+      tryif contains l phi
+      then (tryif contains r phi
+        then apply frewrite_equiv_bin_lr
+        else apply frewrite_equiv_bin_l)
+      else apply frewrite_equiv_bin_r
+    )
+    ; frewrite_equiv_solve H phi psi
+  | quant _ _ _ <--> _ => apply frewrite_equiv_quant; frewrite_equiv_solve H phi psi
+  end.
+
+(* Replaces all occurences of `t` in `phi` with `s`. *)
+Ltac frewrite_replace_all phi t s :=
+  match phi with
+  | context C[t] => let phi' := context C[s] in frewrite_replace_all phi' t s
+  | _ => phi
+  end.
+
 Fixpoint up_n `{funcs_signature} n sigma := match n with
 | 0 => sigma
 | S n' => up (up_n n' sigma)
@@ -1542,7 +1636,23 @@ Ltac frewrite' T A back := fun contxt =>
    * do the rewriting and fold back later. *)
   custom_unfold;
 
-  match get_form_hyp H with atom ?p (@Vector.cons _ ?_t _ (@Vector.cons _ ?_t' _ (Vector.nil term))) =>
+  match get_form_hyp H with 
+  (* Rewrite with equivalence *)
+  | ?_phi <--> ?_psi => 
+    let phi := match back with true => _psi | false => _phi end in
+    let psi := match back with true => _phi | false => _psi end in
+    match back with true => apply frewrite_equiv_switch in H | _ => idtac end;
+
+    let G := get_form_goal in
+    let G' := frewrite_replace_all G phi psi in
+    let E := fresh "E" in
+    assert_compat (G <--> G') as E;
+    [ frewrite_equiv_solve H phi psi |];
+    feapply E;
+    clear E
+
+  (* Rewrite with equality *)
+  | atom ?p (@Vector.cons _ ?_t _ (@Vector.cons _ ?_t' _ (Vector.nil term))) =>
     (* Make sure that we have equality *)
     assert (p = Eq_pred) as _ by reflexivity;
 
