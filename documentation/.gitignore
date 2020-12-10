@@ -3,6 +3,7 @@
 *.log
 *.fls
 *.toc
+*.out
 *.fdb_latexmk
 *.synctex.gz
 _minted-proof-mode
