@@ -118,7 +118,7 @@ Instance prv_WeakClass `{funcs_signature, preds_signature, peirce} : WeakClass (
   Weak := Deduction.Weak
 |}.
 
-Instance tprv_DeductionRules `{funcs_signature, preds_signature, peirce} : DeductionRules theory tprv (fun a b => extend b a) mapT (fun a b => in_theory b a) := 
+Instance tprv_DeductionRules `{funcs_signature, preds_signature, peirce, EqDec syms, EqDec preds} : DeductionRules theory tprv (fun a b => extend b a) mapT (fun a b => in_theory b a) := 
 {| 
   II := Theories.T_II ;
   IE := Theories.T_IE ;
@@ -652,6 +652,9 @@ Section Fintro.
     eapply Weak in Ht. eapply IE. apply Ht. ctx. firstorder.
   Qed.
 
+  Context {eq_dec_Funcs : EqDec syms}.
+  Context {eq_dec_Preds : EqDec preds}.
+
   Lemma intro_and_destruct_T T s t G :
     T ⊩ (s --> t --> G) -> T ⊩ (s ∧ t --> G).
   Proof.
@@ -891,6 +894,9 @@ Section Fapply.
   Proof.
     intros. apply (IE _ psi). eapply CE2. apply H. apply H0.
   Qed.
+
+  Context {eq_dec_Funcs : EqDec syms}.
+  Context {eq_dec_Preds : EqDec preds}.
 
   Lemma fapply_equiv_l_T A phi psi :
     A ⊩ (phi <--> psi) -> A ⊩ phi -> A ⊩ psi.
@@ -1205,6 +1211,9 @@ Section Fassert.
     intros H1 H2. eapply IE. exact H2. exact H1.
   Qed.
 
+  Context {eq_dec_Funcs : EqDec syms}.
+  Context {eq_dec_Preds : EqDec preds}.
+
   Lemma fassert_help_T `{peirce} A phi psi :
     A ⊩ phi -> A ⊩ (phi --> psi) -> A ⊩ psi.
   Proof.
@@ -1360,6 +1369,18 @@ Section Classical.
     apply DI1. apply Ctx. now left.
   Qed.
 
+  Lemma contradiction_help A phi :
+    A ⊢C ((phi --> ⊥) --> ⊥) -> A ⊢C phi.
+  Proof.
+    intro H. eapply IE. eapply Pc. apply II.
+    apply Exp. eapply IE. eapply Weak. apply H. firstorder.
+    apply II. eapply IE. apply Ctx. right. now left.
+    apply Ctx. now left.
+  Qed.
+
+  Context {eq_dec_Funcs : EqDec syms}.
+  Context {eq_dec_Preds : EqDec preds}.
+
   Lemma case_help_T A phi psi :
     A ⊩C (phi ∨ (phi --> ⊥) --> psi) -> A ⊩C psi.
   Proof.
@@ -1368,15 +1389,6 @@ Section Classical.
     apply II. apply DI2. apply II.
     eapply IE. apply Ctx. firstorder.
     apply DI1. apply Ctx. firstorder.
-  Qed.
-
-  Lemma contradiction_help A phi :
-    A ⊢C ((phi --> ⊥) --> ⊥) -> A ⊢C phi.
-  Proof.
-    intro H. eapply IE. eapply Pc. apply II.
-    apply Exp. eapply IE. eapply Weak. apply H. firstorder.
-    apply II. eapply IE. apply Ctx. right. now left.
-    apply Ctx. now left.
   Qed.
 
   Lemma contradiction_help_T A phi :
@@ -1541,6 +1553,9 @@ Section FrewriteEquiv.
   Proof.
     intros E. fdestruct E. fsplit; ctx.
   Qed.
+
+  Context {eq_dec_Funcs : EqDec syms}.
+  Context {eq_dec_Preds : EqDec preds}.
 
 End FrewriteEquiv.
 

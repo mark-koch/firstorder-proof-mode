@@ -2,7 +2,9 @@ Require Import FOL.
 Require Import Deduction.
 Require Import Tarski.
 Require Import List.
-Require Import Equations.Equations Equations.Prop.DepElim.
+Require Import Arith.PeanoNat.
+From Equations Require Import Equations.
+Require Import Coq.Logic.Eqdep_dec.
 
 
 
@@ -13,18 +15,69 @@ Definition extend `{funcs_signature, preds_signature} T (phi : form) := fun psi 
 Infix "⋄" := extend (at level 20).
 
 
+
 Section Theories.
 
 Context {Σ_funcs : funcs_signature}.
 Context {Σ_preds : preds_signature}.
 
-Context  {p : peirce}.
+Context {p : peirce}.
 
 
 Definition mapT (f : form -> form) (T : theory) : theory := fun phi => exists psi, T psi /\ f psi = phi.
 
 
-Inductive unused_term (n : nat) : term -> Prop :=
+(** Equality deciders *)
+
+Context {eq_dec_Funcs : EqDec syms}.
+Context {eq_dec_Preds : EqDec preds}.
+
+Instance eqdec_vec X {DX : EqDec X} n : EqDec (Vector.t X n).
+Proof.
+  intros x y. apply Vector.eq_dec with (A_beq := fun a b => if DX a b then true else false). intros a b. now destruct (DX a b).
+Qed.
+
+Lemma eqdec_vec_in X n (v : vec X n) :
+  (forall x, vec_in x v -> forall y, {x = y} + {x <> y}) -> forall v', {v = v'} + {v <> v'}.
+Proof.
+  intros Hv. induction v.
+  - intros v'. dependent elimination v'. now left.
+  - intros v'. dependent elimination v'. destruct (Hv h (vec_inB h v) h0) as [->|].
+    destruct ((IHv (fun x H => Hv x (vec_inS x h0 v H))) t) as [->|]. now left.
+    right. intros [=]. apply inj_pair2_eq_dec in H0. auto. intros x y. decide equality.
+    right. congruence.
+Qed.
+
+Global Instance eqdec_term : EqDec term.
+Proof.
+  intros x. induction x.
+  - destruct y. destruct (eq_dec x n) as [->|]. now left. right. congruence.
+    right. congruence.
+  - destruct y. right. congruence. destruct (eq_dec F f) as [->|].
+    assert ({v = v0} + {v <> v0}) as [->|]. { apply eqdec_vec_in. exact X. }
+    now left. right. intros [=]. apply inj_pair2_eq_dec in H0. auto. exact eq_dec.
+    right. congruence.
+Qed.
+
+Global Instance eqdec_form : EqDec form.
+Proof.
+  intros x. induction x; destruct y; try (right; congruence).
+  - now left.
+  - destruct (eq_dec P P0) as [->|]. destruct (eq_dec v v0) as [->|].
+    now left. right. intros [=]. apply inj_pair2_eq_dec in H0. auto. exact eq_dec.
+    right. congruence.
+  - destruct b, b0; try (right; congruence);
+    destruct (IHx1 y1) as [->|], (IHx2 y2) as [->|]; try (now left); try (right; congruence).
+  - destruct q, q0; try (right; congruence);
+    destruct (IHx y) as [->|]; try (now left); try (right; congruence).
+Qed.
+
+
+(* Now we can define removal from formula lists *)
+Definition rem := @remove form eq_dec.
+
+
+(* Inductive unused_term (n : nat) : term -> Prop :=
 | uft_var m : n <> m -> unused_term n ($m)
 | uft_Func F v : (forall t, vec_in t v -> unused_term n t) -> unused_term n (func F v).
 
@@ -39,7 +92,7 @@ Definition closed_theory (T : theory) := forall phi, phi t∈ T -> closed phi = 
 Lemma subst_closed s phi :
   closed phi = true -> phi[s] = phi.
 Proof.
-Admitted.
+Admitted. *)
 
 
 Theorem WeakT A B phi :
@@ -96,20 +149,10 @@ Qed.
 
 
 
-Lemma form_eqdec (x y : form) :
-  {x = y} + {x <> y}.
-Proof.
-  revert y. induction x; destruct y; try (right; congruence).
-  - now left.
-  -
-Admitted.
-
-Definition rem := remove form_eqdec.
-
 Lemma contains_rem A T phi :
   A ⊏ T ⋄ phi -> rem phi A ⊏ T.
 Proof.
-  intros H1. induction A. firstorder. cbn. destruct (form_eqdec phi a) as [->|H2].
+  intros H1. induction A. firstorder. cbn. destruct (eq_dec phi a) as [->|H2].
   - apply IHA. eapply contains_cons2, H1.
   - apply contains_cons. destruct (H1 a) as [| ->]; firstorder. 
     apply IHA. eapply contains_cons2, H1.
@@ -118,13 +161,13 @@ Qed.
 Lemma incl_rem1 A phi :
   rem phi A <<= A.
 Proof.
-  induction A. firstorder. cbn. destruct (form_eqdec phi a) as [-> |]; firstorder.
+  induction A. firstorder. cbn. destruct (eq_dec phi a) as [-> |]; firstorder.
 Qed.
 
 Lemma incl_rem2 A phi :
   A <<= phi :: rem phi A.
 Proof.
-  induction A. firstorder. cbn. destruct (form_eqdec phi a) as [-> |]; firstorder.
+  induction A. firstorder. cbn. destruct (eq_dec phi a) as [-> |]; firstorder.
 Qed.
 
 
@@ -207,7 +250,7 @@ Proof.
     + eapply Weak. apply B2. rewrite map_app. erewrite map_shift_up_down_eq with (T := T).
       eapply incl_tran with (m := phi :: rem phi B). apply incl_rem2.
       apply incl_cons. now left. apply incl_tl. now apply incl_appr.
-      clear B2. induction B. firstorder. cbn. destruct (form_eqdec phi a) as [-> |].
+      clear B2. induction B. firstorder. cbn. destruct (eq_dec phi a) as [-> |].
       * firstorder.
       * apply contains_cons. destruct (B1 a) as [| ->]. now left. assumption.
         apply IHB. eapply contains_cons2, B1. easy. firstorder.

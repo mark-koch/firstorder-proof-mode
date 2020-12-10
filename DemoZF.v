@@ -18,6 +18,13 @@ Ltac custom_fold ::= fold sub in *.
 Ltac custom_unfold ::= unfold sub in *.
 
 
+Instance eqdec_funcs : EqDec ZF_func_sig.
+Proof. intros x y; decide equality. Qed.
+
+Instance eqdec_preds : EqDec ZF_pred_sig.
+Proof. intros x y; decide equality. Qed.
+
+
 Definition ax_refl := ∀ $0 ≡ $0.
 Definition ax_sym := ∀ ∀ $1 ≡ $0 --> $0 ≡ $1.
 Definition ax_trans := ∀ ∀ ∀ $2 ≡ $1 --> $1 ≡ $0 --> $2 ≡ $0.
