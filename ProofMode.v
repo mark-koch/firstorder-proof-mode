@@ -431,6 +431,19 @@ Tactic Notation "enough_compat" constr(phi) "as" ident(H) := enough_compat' phi 
 Tactic Notation "enough_compat" constr(phi) "by" tactic(tac) := let H := fresh in enough_compat' phi H; [tac|].
 Tactic Notation "enough_compat" constr(phi) "as" ident(H) "by" tactic(tac) := enough_compat' phi H; [tac|].
 
+Ltac apply_compat' H1 H2 :=
+  match goal with
+  | [ |- _ ⊢ _ ] => apply H1
+  | [ |- _ ⊩ _ ] => apply H2
+  end.
+Ltac apply_compat_in H1 H2 H :=
+  match goal with
+  | [ |- _ ⊢ _ ] => apply H1 in H
+  | [ |- _ ⊩ _ ] => apply H2 in H
+  end.
+Tactic Notation "apply_compat" constr(H1) constr(H2) := apply_compat' H1 H2.
+Tactic Notation "apply_compat" constr(H1) constr(H2) "in" hyp(H) := apply_compat_in H1 H2 H.
+
 
 (* Return the context of the goal or a hypothesis *)
 Ltac get_context_goal :=
@@ -1557,6 +1570,39 @@ Section FrewriteEquiv.
   Context {eq_dec_Funcs : EqDec syms}.
   Context {eq_dec_Preds : EqDec preds}.
 
+  Lemma frewrite_equiv_bin_l_T T op phi psi theta :
+    T ⊩ (phi <--> psi) -> T ⊩ (bin op phi theta <--> bin op psi theta).
+  Proof.
+    intros [A [ ]]. exists A. split. easy. now apply frewrite_equiv_bin_l.
+  Qed.
+
+  Lemma frewrite_equiv_bin_r_T T op phi psi theta :
+    T ⊩ (phi <--> psi) -> T ⊩ (bin op theta phi <--> bin op theta psi).
+  Proof.
+    intros [A [ ]]. exists A. split. easy. now apply frewrite_equiv_bin_r.
+  Qed.
+
+  Lemma frewrite_equiv_bin_lr_T T op phi psi theta chi :
+    T ⊩ (phi <--> psi) -> T ⊩ (theta <--> chi) -> T ⊩ (bin op phi theta <--> bin op psi chi).
+  Proof.
+    intros [A [ ]] [B [ ]]. exists (List.app A B). split.
+    now apply contains_app. apply frewrite_equiv_bin_lr.
+    eapply Weak. apply H0. now apply incl_appl.
+    eapply Weak. apply H2. now apply incl_appr.
+  Qed.
+
+  Lemma frewrite_equiv_quant_T T op phi psi :
+    T ⊩ (phi <--> psi) -> T ⊩ (quant op phi[↑] <--> quant op psi[↑]).
+  Proof.
+    intros [A [ ]]. exists A. split. easy. now apply frewrite_equiv_quant.
+  Qed.
+
+  Lemma frewrite_equiv_switch_T T phi psi :
+    T ⊩ (phi <--> psi) -> T ⊩ (psi <--> phi).
+  Proof.
+    intros [A [ ]]. exists A. split. easy. now apply frewrite_equiv_switch.
+  Qed.
+
 End FrewriteEquiv.
 
 Ltac contains phi f := match phi with f => idtac | context P [ f ] => idtac end.
@@ -1569,12 +1615,14 @@ Ltac frewrite_equiv_solve H phi psi :=
   | bin ?op ?l ?r <--> _ => (
       tryif contains l phi
       then (tryif contains r phi
-        then apply frewrite_equiv_bin_lr
-        else apply frewrite_equiv_bin_l)
-      else apply frewrite_equiv_bin_r
-    )
-    ; frewrite_equiv_solve H phi psi
-  | quant _ _ _ <--> _ => apply frewrite_equiv_quant; frewrite_equiv_solve H phi psi
+        then apply_compat frewrite_equiv_bin_lr frewrite_equiv_bin_lr_T
+        else apply_compat frewrite_equiv_bin_l frewrite_equiv_bin_l_T)
+      else apply_compat frewrite_equiv_bin_r frewrite_equiv_bin_r_T
+    );
+    frewrite_equiv_solve H phi psi
+  | quant _ _ _ <--> _ => 
+    apply_compat frewrite_equiv_quant frewrite_equiv_quant_T;
+    frewrite_equiv_solve H phi psi
   end.
 
 (* Replaces all occurences of `t` in `phi` with `s`. *)
@@ -1656,7 +1704,7 @@ Ltac frewrite' T A back := fun contxt =>
   | ?_phi <--> ?_psi => 
     let phi := match back with true => _psi | false => _phi end in
     let psi := match back with true => _phi | false => _psi end in
-    match back with true => apply frewrite_equiv_switch in H | _ => idtac end;
+    match back with true => apply_compat frewrite_equiv_switch frewrite_equiv_switch_T in H | _ => idtac end;
 
     let G := get_form_goal in
     let G' := frewrite_replace_all G phi psi in
