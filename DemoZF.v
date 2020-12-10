@@ -14,15 +14,14 @@ Section ZF.
 
 Variable p : peirce.
 
-Ltac custom_fold ::= fold sub in *.
-Ltac custom_unfold ::= unfold sub in *.
-
-
 Instance eqdec_funcs : EqDec ZF_func_sig.
 Proof. intros x y; decide equality. Qed.
 
 Instance eqdec_preds : EqDec ZF_pred_sig.
 Proof. intros x y; decide equality. Qed.
+
+Ltac custom_fold ::= fold sub in *.
+Ltac custom_unfold ::= unfold sub in *.
 
 
 Definition ax_refl := ∀ $0 ≡ $0.

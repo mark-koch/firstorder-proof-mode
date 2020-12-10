@@ -18,15 +18,15 @@ Variable p : peirce.
 
 (** Setup *)
 
-Ltac custom_fold ::= fold zero in *.
-Ltac custom_unfold ::= unfold zero in *.
-Ltac custom_simpl ::= try rewrite !numeral_subst_invariance.
-
 Instance eqdec_funcs : EqDec PA_funcs_signature.
 Proof. intros x y; decide equality. Qed.
 
 Instance eqdec_preds : EqDec PA_preds_signature.
 Proof. intros x y. destruct x, y. now left. Qed.
+
+Ltac custom_fold ::= fold zero in *.
+Ltac custom_unfold ::= unfold zero in *.
+Ltac custom_simpl ::= try rewrite !numeral_subst_invariance.
 
 
 
