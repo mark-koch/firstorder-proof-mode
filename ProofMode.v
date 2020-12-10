@@ -848,6 +848,60 @@ Tactic Notation "fintros" constr(H1) constr(H2) constr(H3) constr(H4) constr(H5)
 
 
 
+
+(* High level context managment *)
+
+(* Tactic Notation "is_hyp" hyp(H) := idtac. *)
+Ltac is_hyp H := match type of H with ?t => match type of t with Prop => idtac end end.
+
+(* Check wether T is a hypothesis, a context index, a context formula
+ * or a context name and put it into hypothesis H. *)
+ Ltac turn_into_hypothesis T H contxt := 
+  tryif is_hyp T
+  then assert (H := T)  (* Hypothesis *)
+  else match goal with 
+  | [ |- @prv _ _ ?p ?C _ ] => 
+      match type of T with
+      | form => assert (@prv _ _ p C T) as H by ctx  (* Explicit form *)
+      | nat => let T' := nth C T in assert (@prv _ _ p C T') as H by ctx  (* Idx in context *)
+      | string => match lookup contxt T with  (* Context name *)
+        | @None => let msg := eval cbn in ("Unknown identifier: " ++ T) in fail 4 msg
+        | @Some _ ?n => let T' := nth C n in assert (@prv _ _ p C T') as H by ctx
+        end
+      end
+  | [ |- @tprv _ _ ?p ?C _ ] => 
+      match type of T with
+      | form => assert (@tprv _ _ p C T) as H by ctx  (* Explicit form *)
+      | nat => let T' := nth C T in assert (@tprv _ _ p C T') as H by ctx  (* Idx in context *)
+      | string => match lookup contxt T with  (* Context name *)
+        | @None => let msg := eval cbn in ("Unknown identifier: " ++ T) in fail 4 msg
+        | @Some _ ?n => let T' := nth C n in assert (@tprv _ _ p C T') as H by ctx
+        end
+      end
+  end.
+
+(* Replace the context entry T_old with formula `phi` in 
+ * `H_new : X ⊢ phi` *)
+Ltac replace_context T_old H_new :=
+  let C := get_context_goal in
+  let phi := get_form_hyp H_new in
+  let psi := get_form_goal in
+  let X := fresh in
+  (enough_compat (phi --> psi) as X by eapply (IE _ _ _ X); apply H_new);
+  let C' := match type of T_old with
+    | nat => replace_ltac C T_old phi
+    | form => map_ltac C ltac:(fun f => match f with T_old => phi | ?psi => psi end)
+    | string => match lookup C T_old with
+      | @None => let msg := eval cbn in ("Unknown identifier: " ++ T_old) in fail 4 msg
+      | @Some _ ?n => replace_ltac C n phi
+      end
+  end in
+  fintro; apply (Weak C'); [| firstorder].
+
+
+
+
+
 (* 
  * [fspecialize (H x1 x2 ... xn)], [fspecialize H with x1 x2 ... xn] 
  * 
@@ -877,6 +931,22 @@ Tactic Notation "fspecialize" "(" hyp(H) constr(x1) constr(x2) constr(x3) ")" :=
 Tactic Notation "fspecialize" hyp(H) "with" constr(x1) := make_compatible ltac:(fun _ => fspecialize_list H constr:([x1])).
 Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) := make_compatible ltac:(fun _ => fspecialize_list H constr:([x1;x2])).
 Tactic Notation "fspecialize" hyp(H) "with" constr(x1) constr(x2) constr(x3) := make_compatible ltac:(fun _ => fspecialize_list H constr:([x1;x2;x3])).
+
+(* Specialize in context *)
+Ltac fspecialize_context T A :=
+  let H := fresh "H" in
+  make_compatible ltac:(fun C => turn_into_hypothesis "IH" H C);
+  fspecialize_list H A;
+  replace_context T H;
+  clear H.
+
+Tactic Notation "fspecialize" "(" constr(H) constr(x1) ")" := fspecialize_context H constr:([x1]).
+Tactic Notation "fspecialize" "(" constr(H) constr(x1) constr(x2) ")" := make_compatible ltac:(fspecialize_context H constr:([x1; x2])).
+Tactic Notation "fspecialize" "(" constr(H) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(fspecialize_context H constr:([x1;x2;x3])).
+
+Tactic Notation "fspecialize" constr(H) "with" constr(x1) := make_compatible ltac:(fspecialize_context H constr:([x1])).
+Tactic Notation "fspecialize" constr(H) "with" constr(x1) constr(x2) := make_compatible ltac:(fspecialize_context H constr:([x1;x2])).
+Tactic Notation "fspecialize" constr(H) "with" constr(x1) constr(x2) constr(x3) := make_compatible ltac:(fspecialize_context H constr:([x1;x2;x3])).
 
 
 
@@ -976,34 +1046,6 @@ Ltac fapply_without_quant H :=
   end.
 
 Ltac instantiate_evars H := repeat eassert (H := H _); repeat eapply AllE in H.
-(* Tactic Notation "is_hyp" hyp(H) := idtac. *)
-Ltac is_hyp H := match type of H with ?t => match type of t with Prop => idtac end end.
-
-(* Check wether T is a hypothesis, a context index, a context formula
- * or a context name and put it into hypothesis H. *)
-Ltac turn_into_hypothesis T H contxt := 
-  tryif is_hyp T
-  then assert (H := T)  (* Hypothesis *)
-  else match goal with 
-  | [ |- @prv _ _ ?p ?C _ ] => 
-      match type of T with
-      | form => assert (@prv _ _ p C T) as H by ctx  (* Explicit form *)
-      | nat => let T' := nth C T in assert (@prv _ _ p C T') as H by ctx  (* Idx in context *)
-      | string => match lookup contxt T with  (* Context name *)
-        | @None => let msg := eval cbn in ("Unknown identifier: " ++ T) in fail 4 msg
-        | @Some _ ?n => let T' := nth C n in assert (@prv _ _ p C T') as H by ctx
-        end
-      end
-  | [ |- @tprv _ _ ?p ?C _ ] => 
-      match type of T with
-      | form => assert (@tprv _ _ p C T) as H by ctx  (* Explicit form *)
-      | nat => let T' := nth C T in assert (@tprv _ _ p C T') as H by ctx  (* Idx in context *)
-      | string => match lookup contxt T with  (* Context name *)
-        | @None => let msg := eval cbn in ("Unknown identifier: " ++ T) in fail 4 msg
-        | @Some _ ?n => let T' := nth C n in assert (@tprv _ _ p C T') as H by ctx
-        end
-      end
-  end.
 
 (* If `H` has the type `P1 -> P2 -> ... -> Pn -> (A ⊢ ϕ)`, this
  * tactic adds goals for `P1, P2, ..., Pn` and specializes `H`. *)
@@ -1089,23 +1131,6 @@ Tactic Notation "fapply" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := m
  * - Name of a context assumption in proof mode (e.g. [fapply "H2" in "H1"])
  *)
 
-(* Replace the context entry T_old with formula `phi` in 
- * `H_new : X ⊢ phi` *)
-Ltac replace_context T_old H_new :=
-let C := get_context_goal in
-let phi := get_form_hyp H_new in
-let psi := get_form_goal in
-let X := fresh in
-(enough_compat (phi --> psi) as X by eapply (IE _ _ _ X); apply H_new);
-let C' := match type of T_old with
-  | nat => replace_ltac C T_old phi
-  | form => map_ltac C ltac:(fun f => match f with T_old => phi | ?psi => psi end)
-  | string => match lookup C T_old with
-    | @None => let msg := eval cbn in ("Unknown identifier: " ++ T_old) in fail 4 msg
-    | @Some _ ?n => replace_ltac C n phi
-    end
-end in
-fintro; apply (Weak C'); [| firstorder].
 
 (* Takes two formulas `H_imp : X ⊢ p1 --> ... --> pn --> q`
  * `H_hyp : X ⊢ pn`. It also takes `T_hyp` which identifies `H_hyp`
