@@ -4,10 +4,25 @@
 
 \usepackage{amsmath}
 \usepackage{amssymb}
+\usepackage{csquotes}
+\usepackage{hyperref}
+
+% Adjustbox no nicely center rewrite diagrams that are wider than the margin
+\usepackage[export]{adjustbox}[2011/08/13]
+
+\usepackage{tikz}
+\usetikzlibrary{cd}
+\usetikzlibrary{decorations.pathreplacing}
 
 \usepackage{minted}
 \usemintedstyle{tango}
 \newcommand{\coq}[1]{\mintinline{coq}{#1}}
+
+% Fix red boxes around unicode characters in minted: https://tex.stackexchange.com/questions/343494/minted-red-box-around-greek-characters
+\makeatletter
+\AtBeginEnvironment{minted}{\dontdofcolorbox}
+\def\dontdofcolorbox{\renewcommand\fcolorbox[4][]{##4}}
+\makeatother
  
 
 \usepackage[framemethod=TikZ]{mdframed}
@@ -51,13 +66,14 @@
 \newcommand{\important}[1]{
 	\vspace{3pt}
 	\begin{boximportant}
-		\textcolor{colorimportant}{\textbf{Important}\\#1}
+		% Parbox to avoid page break because mdframed messes up the colors :(
+		\parbox{\textwidth}{\textcolor{colorimportant}{\textbf{Important}\\#1}}
 	\end{boximportant}}
 
 \newcommand{\remark}[1]{
 	\vspace{3pt}
 	\begin{boxremark}
-		\textbf{Remark}\\#1
+		\parbox{\textwidth}{\textbf{Remark}\\#1}
 	\end{boxremark}}
 
 \newcommand{\example}[1]{\medskip\\\textbf{Example:}~~#1}
@@ -65,7 +81,7 @@
 \newcommand{\improve}[1]{
 	\vspace{3pt}
 	\begin{boximprove}
-		\textcolor{colorimprove}{\textbf{TODO}\\#1}
+		\parbox{\textwidth}{\textcolor{colorimprove}{\textbf{TODO}\\#1}}
 	\end{boximprove}}
 
 
@@ -89,13 +105,31 @@ The first part of this document contains a brief users guide describing the setu
 Then we have a look at how the proof mode works internally and ...
 
 
-\section{Users guide}
+\section{User guide}
 
 \subsection{Setup}
 
 To use the proof mode, you need to perform some setup steps beforehand.
 We follow the example for Peano arithmetic in \texttt{DemoPA.v} which can easily be adapted to other systems.
 
+\medskip\noindent
+If you use custom definitions (not notations!) inside your formulas (for example \texttt{zero} in the PA demo or \texttt{subst} in the ZF Demo), you need to register them for the proof mode.
+Simply override the tactics \texttt{custom\_fold} and \texttt{custom\_unfold} with the corresponding \texttt{fold} and \texttt{unfold} calls like this:
+\begin{align*}
+	& \coq{Ltac custom_fold ::= fold zero in *; ...} \\
+	& \coq{Ltac custom_unfold ::= unfold zero in *; ...}
+\end{align*}
+Also if you have custom simplification lemmas, for example substitution invariance for specific terms (like \texttt{numeral\_subst\_invariance}), or any other simplifications that might be helpful in your domain, you can register them by overriding the tactic \texttt{custom\_simpl}:
+$$\coq{Ltac custom_simpl ::= try rewrite !numeral_subst_invariance; ...}$$
+If you want to use rewriting with equalities, you need to show that your signatures satisfy the \texttt{Leibniz} type class:
+$$\coq{Instance PA_Leibniz : Leibniz PA_funcs_signature PA_preds_signature.}$$
+This requires providing the equality predicate and the minimal set of axioms that is needed for proving the following Leibniz rule:
+
+\begin{minted}[fontsize=\footnotesize]{coq}
+leibniz A phi t t' : Axioms <<= A -> A ⊢ eq t t' -> A ⊢ phi[t..] -> A ⊢ phi[t'..]
+leibniz_T T phi t t' : Axioms_T ⊑ T -> T ⊩ eq t t' -> T ⊩ phi[t..] -> T ⊩ phi[t'..]
+\end{minted}
+Note that you can already use the other proof mode tactics to prove this.
 
 \subsection{Overview}
 
@@ -169,7 +203,7 @@ There are a few  to note:
 	The tactics also support intro patterns similar to Coq to recursively destruct conjunctions, disjunctions and existentials.
 	\example{\coq{fintros "[H1 ?]" "[H|[x H2]]" "[|]" "[ ]".}}
 \end{itemize}
-\important{Intro pattern parsing is very limited at the moment. You are not allowed to put any extra spaces inside the pattern or it will not be recognized. For example \texttt{"[H1|H2]"} is valid, while \texttt{"[H1 | H2]"} is not. If you leave out names, the only valid forms are \texttt{"[H ]", "[ H]", "[ ]", "[H|]", "[|H]", "[|]"}. This restriction also applies to every other tactic that uses intro patterns.}
+\label{todo-intro-pattern-parsing}\important{Intro pattern parsing is very limited at the moment. You are not allowed to put any extra spaces inside the pattern or it will not be recognized. For example \texttt{"[H1|H2]"} is valid, while \texttt{"[H1 | H2]"} is not. If you leave out names, the only valid forms are \texttt{"[H ]", "[ H]", "[ ]", "[H|]", "[|H]", "[|]"}. This restriction also applies to every other tactic that uses intro patterns.}
 
 
 
@@ -191,7 +225,7 @@ You can also apply in Hypotheses with intro pattern support. Application of equi
 
 For rewriting to work, make sure that you followed the corresponding setup steps.
 You need an assumption of the form \texttt{C $\vdash$ x == y} and can rewrite in the goal.
-Quantified assumptions are also supported, but your need to give the arguments explicitly
+Quantified assumptions are also supported, but your need to give the arguments explicitly.
 \example{\coq{frewrite "H". frewrite <- (ax_sym zero x).}}
 
 \remark{Rewriting under quantors is supported but you should be aware of the following fact: If you know that \coq{x == y} you actually cannot rewrite in something like \texttt{$\forall$~\coq{x == z}}. Because of the quantor you need shifted occurence of \coq{x} like \texttt{$\forall$~\coq{x`[}$\uparrow$\coq{] == z}}.}
@@ -323,7 +357,156 @@ For the same reason there are the tactics \texttt{assert\_comp} and \texttt{enou
 
 
 
-\subsection{Tactic design}
+\subsection{General tactic design}
+
+Most tactics need to interact with a hypothesis in some way or another.
+As mentioned before, hypotheses can be referenced by a name, a context index, a Coq hypothesis name or by the formula type.
+Therefore the first step is always to move the referenced formula \texttt{phi} into the Coq context by asserting a new hypothesis \texttt{C $\vdash$ phi}, where \texttt{C} is the current context.
+Working with a Coq hypothesis has the benefit, that we are isolated from the goal and can apply tactics directly in \texttt{H}.
+After everything is finished, \texttt{H} gets cleared again.
+
+\medskip\noindent
+Another common pattern is the handling of specialization of hypotheses in tactic arguments.
+For example you might want to give arguments before applying a function:
+$$\coq{frewrite (ax_trans x y z)} ~~\text{ or }~~ \coq{fapply ("H3" a "H")}$$
+Supporting this notation with an unconstrained number of arguments is quite difficult in general.
+Tactics with variable numbers of arguments are possible with continuation passing style, but do not support the notation above.
+Thus the best solution seems to be defining a tactic notation for each argument length you want to support, effectively limiting the possible maximum number of arguments.
+But by covering the range anyone could reasonably use in practice, this should be acceptable.
+
+The tactic notation then calls the \enquote{real} tactic (\texttt{frewrite'}, \texttt{fapply'}, etc.) that accepts a list of all the arguments.
+Each tactic then internally uses the \texttt{fspecialize} tactic that performs the necessary specializations and lookups in the context on the Coq hypothesis \texttt{H}.
+
+\medskip\noindent
+Also noteworthy is the tactic \texttt{simpl\_subst} that can simplify substitutions in the goal or a Coq hypothesis.
+This is also used in many places.
+
+
+
+\subsection{Intros and intro patterns}
+
+In contrast to most of the other tactics, the \texttt{fintro} tactic needs to be aware if the proof mode is active or not, because it changes the context.
+Also introduction of variables behaves differently, depending on whether you do deduction on formula lists or theories:
+
+\medskip\noindent
+With lists, every context is finite which allows us to use a different notion of forall-introduction.
+Instead of shifting the entire context to make variable 0 free, we can find a new variable that is not used and avoid the shifting.
+The lemma used to achieve this gives us a term instead of the actual variable which has the benefit, that the handling of the introduced variables can happen on then Coq level.
+Also it seems more natural to introduce a term \texttt{x}, instead of a variable \texttt{\$n}.
+
+Avoiding the shift is not possible when using theories as they can contain infinitely many formulas.
+There we must use the theory variant of the vanilla forall-introduction rule.
+The variable \texttt{\$0} is again replaced with a Coq variable \texttt{x} using a substitution.
+I also want to mention, that the \texttt{mapT (subst\_term $\uparrow$)} call cannot be simplified computationally because of the way \texttt{mapT} is defined.
+Instead, the tactic \texttt{simpl\_context\_mapT} is used to evaluate the call in a syntactic way by repeatedly applying a rewrite lemma.
+
+\medskip\noindent
+Another critical fact is that because of the purely syntactic matching of Ltac, we cannot look behind defined constants.
+But if the user has such a definition that hides a forall-quantifier (for example the subset predicate in the ZF demo) we would not be able to detect it using matches.
+That is one of the reasons why the user is required to register those definitions by overriding the \texttt{custom\_fold} and \texttt{custom\_unfold} tactic.
+This way, \texttt{fintro} can unfold if it gets stuck and check if there are hidden quantifiers.
+This trick is also used by some other tactics.
+
+\medskip\noindent
+Another problem that occurred when developing the \texttt{fintro} tactic was how to turn a variable name, given by the user as a string, into a fresh Coq identifier.
+Sadly there is no easy way to turn a Gallina string into an Ltac string that can be used to create a fresh name.
+The first solution I came up with was to split up the introduction of variables and hypotheses into two different tactics  so that one can take Coq identifiers as an argument and the other strings.
+The main problem is that this does not work, if the variable name occurs inside the pattern, as is the case with the destruction of an existential.
+Also we want a \texttt{fintros} tactic that can intro multiple things at once.
+This would need be implemented using tactic notations that figure out which version of \texttt{fintro} to call depending on the argument, leading an exponential number of tactic notations that would be required.
+
+Later I found a solution by Tej Chajed developed for the Iris proof mode that translates strings into Coq identifiers\footnote{The code can be found here \url{https://gitlab.mpi-sws.org/iris/string-ident}}.
+This uses Ltac2 and converts between the different string representations, but seems a bit hacky and might break down in future versions of Coq\footnote{For more detailed discussion see here \url{https://github.com/coq/coq/issues/7922}}.
+
+Right now this solves all of the problems but the other solution is also supported, so can intro either with strings or identifiers.
+
+\medskip\noindent
+The \texttt{fintro} tactic is also the main driver of intro patterns.
+Every other tactic that supports intro patterns internally calls \texttt{fintro}.
+For example if your goal is \texttt{C $\vdash$ psi} and you want to call \texttt{fdestruct} on a context formula \coq{"H" : psi}, the formula will be moved to the goal and \texttt{fintro} will be called on \texttt{C $\vdash$ phi $\to$ psi} using the user given intro pattern.
+
+The implementation of the intro patterns is straightforward.
+They get parsed into the inductive type \texttt{intro\_pattern} and then recursively processed.
+For example if you intro on \texttt{phi $\land$ psi $\to$ G} using the pattern \coq{"[P1 P2]"}, the goal gets turned into \texttt{phi $\to$ psi $\to$ G} and we intro recursively using \coq{"P1"} and \coq{"P2"}.
+
+\improve{The parsing could be improved. At the moment additional white spaces cannot be handled. See also the note in \ref{todo-intro-pattern-parsing}.}
+
+
+
+\subsection{Application}
+
+The main driver behind the \texttt{fapply} and \texttt{feapply} tactic is a tactic called \texttt{fapply\_without\_quant}.
+It takes a Coq hypothesis \texttt{H : C $\vdash$ p1 --> ... --> pn --> g} and solves the goal \texttt{C $\vdash$ g} by applying \texttt{H} and leaving the premises \texttt{C $\vdash$ p1}, ..., \texttt{C $\vdash$ pn} for the user to prove.
+
+The actual \texttt{fapply} and \texttt{feapply} tactic simply call this tactic and perform some bookkeeping around it.
+One noteworthy trick is that quantifiers inside the formula to apply with are instantiated with evars.
+This way they can automatically be unified and the user does not need to give the arguments explicitly.
+
+\medskip\noindent
+Ideally the differentiation between \texttt{fapply} and \texttt{feapply} should be just like in Coq.
+But \texttt{fapply} also uses the evars trick to handle unification and behaves exactly like \texttt{feapply} internally.
+The current heuristic is that \texttt{fapply} fails, if the goal still contains evars after the application.
+This obviously fails in cases, were the goal already contained evars before the tactic was called.
+
+\improve{This should be fixed. One would need to remember the names of the evars that \texttt{fapply} created and only check for the existence of those in the goal.}
+
+\subsection{Rewriting}
+
+The \texttt{frewrite} tactic is maybe the most complicated one.
+It supports rewriting under equality with the Leibniz rule and rewriting with equivalences (but currently not under quantifiers).
+The equality predicate and proof of the Leibniz rule are given by the user through the type class \texttt{Leibniz}.
+While the rewriting with equivalences is performed through repeated application of lemmas for each operator, I tries a different syntactic approach for the equality rewriting.
+The general idea can be illustrated with the following example in PA where \texttt{x} should be replaced with \texttt{y}:
+
+\makebox[\textwidth][c]{
+\begin{tikzpicture}\footnotesize
+\node (A) at (0,0) {\texttt{C $\vdash$ $\sigma$ x == z $\lor$ phi}};
+\node (B) at (0,-2) {\texttt{C $\vdash$ $\sigma$(\$0`[x..])\;== z`[$\uparrow$]`[x..]\;$\lor$ phi[$\uparrow$][x..]}};
+\node (C) at (0,-3.5) {\texttt{C $\vdash$ ($\sigma$ \$0 == z`[$\uparrow$] $\lor$ phi[$\uparrow$])[x..]}};
+\node (D) at (0,-5) {\texttt{C $\vdash$ ($\sigma$ \$0 == z`[$\uparrow$] $\lor$ phi[$\uparrow$])[y..]}};
+\node (E) at (0,-6.5) {\texttt{C $\vdash$ $\sigma$(\$0`[y..])\;== z`[$\uparrow$]`[y..]\;$\lor$ phi[$\uparrow$][y..]}};
+\node (F) at (0,-8) {\texttt{C $\vdash$ $\sigma$ y == z $\lor$ phi}};
+
+\path[->] (A) edge node[right,align=left] {\footnotesize Replace \texttt{x} with \texttt{\$0`[x..]} and add identitiy \\\footnotesize substitution \texttt{[$\uparrow$][x..]} behind everything else} (B);
+\path[->] (B) edge node[right,align=left] {\footnotesize Move \texttt{[x..]} outwards} (C);
+\path[->] (C) edge node[right,align=left] {\footnotesize Apply \texttt{Leibniz}} (D);
+\path[->] (D) edge node[right,align=left] {\footnotesize Move \texttt{[y..]} inwards} (E);
+\path[->] (E) edge node[right,align=left] {\footnotesize Simplify} (F);
+\end{tikzpicture}}
+
+\bigskip\noindent
+Sadly this scheme does not work, if the term to rewrite is behind a quantifier, because a substitution \texttt{s} gets turned into \texttt{up s} inside the scope of a quantifier.
+To address this, I generalize the idea by using a function \texttt{up\_n} that gives the iterated application of \texttt{up}:
+
+\bigskip
+\makebox[\textwidth][c]{
+\begin{tikzpicture}\footnotesize
+\node (A) at (0,0) {\texttt{C $\vdash$ ($\forall$ $\sigma$(x`[$\uparrow$]) == \$0) $\lor$ phi}};
+\node (B) at (0,-1.5) {\texttt{C $\vdash$ ($\forall$ $\sigma$(\$1`[up\_n 1 x..])\;== \$0`[up\_n 1 $\uparrow$]`[up\_n 1 x..])\;$\lor$ phi[up\_n 0 $\uparrow$][up\_n 0 x..]}};
+\node (C) at (0,-3) {\texttt{C $\vdash$ (($\forall$ $\sigma$ \$1 == \$0`[up\_n 1 $\uparrow$]) $\lor$ phi[up\_n 0 $\uparrow$])[x..]}};
+\node (D) at (0,-4.5) {\texttt{C $\vdash$ (($\forall$ $\sigma$ \$1 == \$0`[up\_n 1 $\uparrow$]) $\lor$ phi[up\_n 0 $\uparrow$])[y..]}};
+\node (E) at (0,-6) {\texttt{C $\vdash$ ($\forall$ $\sigma$(\$1`[up y..])\;== \$0`[up\_n 1 $\uparrow$]`[up y..])\;$\lor$ phi[up\_n 0 $\uparrow$][y..]}};
+\node (F) at (0,-7.5) {\texttt{C $\vdash$ ($\forall$ $\sigma$(y[$\uparrow$]) == \$0) $\lor$ phi}};
+
+\path[->] (A) edge node[right,align=left] {\footnotesize Use \texttt{up\_n} according to quantifier depth} (B);
+\path[->] (B) edge node[right,align=left] {\footnotesize Move \texttt{[x..]} outwards} (C);
+\path[->] (C) edge node[right,align=left] {\footnotesize Apply \texttt{Leibniz}} (D);
+\path[->] (D) edge node[right,align=left] {\footnotesize Move \texttt{[y..]} inwards} (E);
+\path[->] (E) edge node[right,align=left] {\footnotesize Simplify} (F);
+\end{tikzpicture}}
+
+\bigskip\noindent
+Note that in the case of no quantifiers, we only use \texttt{up\_n 0 s} which is equal to \texttt{s}, so we get essentially the same as in the first example.
+
+\improve{There are some things that could be improved regarding the \texttt{frewrite} tactic:
+\begin{itemize}
+	\item Support rewriting in hypotheses
+	\item Support equivalence rewriting under quantifiers
+	\item Support \texttt{frewrite ... at 2}
+	\item If you want to rewrite under quantifiers, the term needs to be already shifted (in the example above it needs to be \texttt{x`[$\uparrow$]} under the all quantifier). In some cases this is irrelevant because the term is substitution invariant (for example \texttt{num} in PA). Provide a way for the user to register such invariance lemmas and apply them accordingly.
+	\item The evar trick from \texttt{fapply} does not work here because I use syntactic matching to find occurrences of the rewrite variable. Thus the user always needs to give the instantiation for variables. But improving this might be tricky...
+\end{itemize}}
+
 
 
 
