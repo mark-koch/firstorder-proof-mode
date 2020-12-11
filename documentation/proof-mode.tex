@@ -102,7 +102,7 @@ This prototype allows the user to prove statements in a first-order deduction sy
 My main contributions are contained in the Coq files \texttt{ProofMode.v} and \texttt{Theories.v}. Example use cases can be found in the demo files \texttt{DemoPA.v} and \texttt{DemoZF.v} for Peano arithmetic and Zermelo–Fraenkel set theory.
 
 The first part of this document contains a brief users guide describing the setup and the available tactics.
-Then we have a look at how the proof mode works internally and ...
+The second part is a more in depth description of how the proof mode works internally.
 
 
 \section{User guide}
@@ -113,13 +113,29 @@ To use the proof mode, you need to perform some setup steps beforehand.
 We follow the example for Peano arithmetic in \texttt{DemoPA.v} which can easily be adapted to other systems.
 
 \medskip\noindent
+First, you need to prove that your signatures have equality deciders. This should be trivial:
+
+\begin{center}
+\begin{minipage}{.75\textwidth}
+\begin{minted}{coq}
+Instance eqdec_funcs : EqDec PA_funcs_signature.
+Proof. intros x y; decide equality. Qed.
+
+Instance eqdec_preds : EqDec PA_preds_signature.
+Proof. intros x y. destruct x, y. now left. Qed.
+\end{minted}
+\end{minipage}
+\end{center}
+
+
+\medskip\noindent
 If you use custom definitions (not notations!) inside your formulas (for example \texttt{zero} in the PA demo or \texttt{subst} in the ZF Demo), you need to register them for the proof mode.
 Simply override the tactics \texttt{custom\_fold} and \texttt{custom\_unfold} with the corresponding \texttt{fold} and \texttt{unfold} calls like this:
 \begin{align*}
 	& \coq{Ltac custom_fold ::= fold zero in *; ...} \\
 	& \coq{Ltac custom_unfold ::= unfold zero in *; ...}
 \end{align*}
-Also if you have custom simplification lemmas, for example substitution invariance for specific terms (like \texttt{numeral\_subst\_invariance}), or any other simplifications that might be helpful in your domain, you can register them by overriding the tactic \texttt{custom\_simpl}:
+Also if you have custom simplification lemmas, for example substitution invariance for specific terms (like \texttt{numeral\_subst\_invariance} in the PA demo), or any other simplifications that might be helpful in your domain, you can register them by overriding the tactic \texttt{custom\_simpl}:
 $$\coq{Ltac custom_simpl ::= try rewrite !numeral_subst_invariance; ...}$$
 If you want to use rewriting with equalities, you need to show that your signatures satisfy the \texttt{Leibniz} type class:
 $$\coq{Instance PA_Leibniz : Leibniz PA_funcs_signature PA_preds_signature.}$$
@@ -133,7 +149,7 @@ Note that you can already use the other proof mode tactics to prove this.
 
 \subsection{Overview}
 
-The proof mode is invoked with the tactic \texttt{fstart}. This will drastically change the way your Goal looks like:
+The proof mode is invoked with the tactic \texttt{fstart}. This will change the way your goal looks like:
 \begin{itemize}
 	\item 
 	The different hypotheses in the context will be displayed one underneath the other just like the Coq context.
@@ -145,7 +161,7 @@ The proof mode is invoked with the tactic \texttt{fstart}. This will drastically
 If you want to leave the proof mode again, simply call the \texttt{fstop} tactic.
 But note that your custom hypothesis names will get lost and cannot be recovered again.
 
-\remark{It is not necessary to start the proof mode if you only want to use the custom tactics described later. These work out of the box on any goal, regardless if the proof mode is started or not. For simple examples this may already be enough, but for more complex proves, starting the proof mode is recommended.}
+\remark{It is not necessary to start the proof mode if you only want to use the custom tactics described later. These work out of the box on any goal, regardless if the proof mode is started or not. For simple examples this may already be enough, but for more complex proofs, starting the proof mode is recommended.}
 
 
 \subsection{Working with the context}
@@ -167,11 +183,11 @@ There are many different ways you can refer to a hypothesis in the context:
 	You can also refer to a hypothesis by its index in the context. 
 	This is useful when the proof mode is not active.
 	\example{\coq{fapply 3.}}
-	\important{If parts of your context are folded behind an identifier (like \texttt{FA $\vdash$ ...} in the Peano example, this will not work. The only way is to unfold or give the term directly).}
+	\important{If parts of your context are folded behind an identifier (like \texttt{FA $\vdash$ ...} in the Peano example), this will not work. The only way is to unfold or give the term directly.}
 	
 	\item 
 	The Coq context itself is also accessible. 
-	If you have a hypothesis \texttt{H : C $\vdash$ ...} you can pass \texttt{H} as an argument.
+	If you have a hypothesis \texttt{H : C $\vdash$ phi} you can pass \texttt{H} as an argument.
 \end{itemize}
 
 
@@ -183,10 +199,10 @@ There are many different ways you can refer to a hypothesis in the context:
 
 The \texttt{fintro} tactic works analogous to the Coq \texttt{intro} tactic. 
 There is also the \texttt{fintros}-variant for introducing multiple things at once. 
-There are a few  to note:
+There are a few things to note:
 \begin{itemize}
 	\item 
-	If you introduce an $\forall$ quantor, you can give an identifier name as a string. 
+	If you introduce an forall-quantifier, you can give an identifier name as a string. 
 	If you do not give an argument or put the string \coq{"?"}, a new name is automatically generated.
 	\example{\coq{fintro "x". fintro. fintro "?".}}
 	
@@ -248,8 +264,7 @@ Behaves like the Coq tactic \texttt{assert} and supports intro patterns.
 
 \subsubsection{\ttfamily fspecialize}
 
-Can be used to specialize Coq hypothesis.
-This tactic is mostly used internally and does not work on formulas in the context.
+Can be used to specialize formulas.
 \example{\coq{fspecialize (H x y "H3"). fspecialize H with a, b.}}
 
 
@@ -263,11 +278,11 @@ The \texttt{ctx} tactic solves goals that are contained in the context.
 In a classical system, there is a tactic \texttt{fclassical} that performs a case distinction on a formula.
 You get two cases, one with the formula and one with the negated formula in the context.
 Also supports intro patterns.
-\example{\coq{fclassical phi. fclassical (a} $\land$\coq{ b) as "[A|B]" "H".}}
+\example{\coq{fclassical phi. fclassical (a} $\land$\coq{ b) as "[A B]" "H".}}
 
 \medskip\noindent
 The tactic \texttt{fcontradict} allows for proof by contradiction.
-It puts the negated original goal in the context and leaves the user to prove falsity.s
+It puts the negated original goal in the context and leaves the user to prove falsity.
 \example{\coq{fcontradict phi. fcontradict (a} $\land$\coq{ b) as "H".}}
 
 
@@ -286,12 +301,12 @@ There are some other tactics that behave just like their Coq counterpart:
 
 \subsection{Proof Mode}
 
-My goal for the proof mode was to have it only active inside the Coq goal.
-Deductions in the context should be displayed in the usual \texttt{C $\vdash$ phi} Notation.
+My goal for the proof mode was to have the special notation only active inside the Coq goal.
+Deductions in the Coq context should be displayed in the usual \texttt{C $\vdash$ phi} notation.
 Therefore simply overriding the \texttt{prv} notation to get the horizontal bar is not sufficient.
 The main trick is to define a function
 $$\coq{pm C phi := prv C phi}$$
-that acts like an alias to the \texttt{prv} type.
+that acts like an alias for the \texttt{prv} type.
 By defining the proof mode notation only for \texttt{pm}, we can manually control when to use it while preserving computational equivalence.
 For the same reason there are aliases for \texttt{cons} and \texttt{nil} on formula lists
 \begin{align*}
@@ -301,7 +316,7 @@ For the same reason there are aliases for \texttt{cons} and \texttt{nil} on form
 They are used to print hypotheses one under another in the context.
 Note the extra string argument \texttt{s} in \texttt{ccons}.
 It is used to give names to the hypotheses.
-Additional there is an alias for complete formula lists
+Additionally there is an alias for complete formula lists
 $$\coq{cblackbox (C : list form) := C}$$
 that is wrapped around lists that are not syntactically known to be nil or cons.
 This is only used to indent these lists nicely in the context.
@@ -335,7 +350,7 @@ The most important design decision is, that all tactics available to the user as
 Therefore they only have to work on goals of the form \texttt{prv} or \texttt{tprv} (notable exceptions are the \texttt{fintro} and \texttt{fdestruct} tactic, because they need to alter the context).
 To make tactics compatible with the proof mode, there is the higher order tactic \texttt{make\_compatible} that takes a tactic and lifts it to work with the proof mode.
 
-If the proof mode is active, \texttt{make\_compatible} stops it while remembering the context, executes the given tactic and  restores the proof mode to state it has been before.
+If the proof mode is active, \texttt{make\_compatible} stops it while remembering the context, executes the given tactic and  restores the proof mode to the state it has been before.
 Also tactics lifted by \texttt{make\_compatible} get an extra argument where the current context is filled in.
 This way, tactics get access to the hypothesis names that are only present if the proof mode is active.
 
@@ -346,14 +361,14 @@ By adding this compatibility layer, tactics now only need to differentiate betwe
 To make this as painless as possible, I defined a type class \texttt{DeductionRules} that includes all of the first-order deduction rules and showed that \texttt{tprv} also satisfies them (see \texttt{Theories.v}).
 There is also a type class for classical deduction rules and Weakening that is satisfied by \texttt{tprv}.
 
-The advantage is, that you can now apply rules like \texttt{II}, \texttt{AllE}, \texttt{Weak} etc. independent of the concrete system you are in and tactics do not need differentiate these cases that would result in a lot of duplicated code.
+The advantage is, that you can now apply rules like \texttt{II}, \texttt{AllE}, \texttt{Weak} etc. independent of the concrete system you are in and tactics do not need to differentiate these cases that would result in a lot of duplicated code.
 There is also the additional benefit that this can easily be extended, for example to deduction on a tuple of a list and a theory.
 
 \medskip\noindent
 On top of that there are the tactics \texttt{get\_context} and \texttt{get\_form} that return the context or the formula of the goal or of a Coq hypothesis.
 This avoids matching on the goal.
 For the same reason there are the tactics \texttt{assert\_comp} and \texttt{enough\_comp} that can be used in place of the original Coq tactic.
-\example{\coq{(assert_comp (phi --> psi) as H by tac)} asserts \texttt{H : C $\vdash$ phi --> psi} or \texttt{H : C $\Vdash$ phi --> psi} depending on the current context \texttt{C} and deduction system.}
+\example{\coq{(assert_comp (phi --> psi) as H by tac)} asserts \texttt{H : C $\vdash$ phi --> psi} or \texttt{H : C $\Vdash$ phi --> psi} depending on the current context \texttt{C} and the deduction system.}
 
 
 
@@ -361,7 +376,7 @@ For the same reason there are the tactics \texttt{assert\_comp} and \texttt{enou
 
 Most tactics need to interact with a hypothesis in some way or another.
 As mentioned before, hypotheses can be referenced by a name, a context index, a Coq hypothesis name or by the formula type.
-Therefore the first step is always to move the referenced formula \texttt{phi} into the Coq context by asserting a new hypothesis \texttt{C $\vdash$ phi}, where \texttt{C} is the current context.
+Therefore the first step is always to move the referenced formula \texttt{phi} into the Coq context by asserting a new hypothesis \texttt{H : C $\vdash$ phi}, where \texttt{C} is the current context.
 Working with a Coq hypothesis has the benefit, that we are isolated from the goal and can apply tactics directly in \texttt{H}.
 After everything is finished, \texttt{H} gets cleared again.
 
@@ -402,7 +417,7 @@ Instead, the tactic \texttt{simpl\_context\_mapT} is used to evaluate the call i
 
 \medskip\noindent
 Another critical fact is that because of the purely syntactic matching of Ltac, we cannot look behind defined constants.
-But if the user has such a definition that hides a forall-quantifier (for example the subset predicate in the ZF demo) we would not be able to detect it using matches.
+But if the user has a definition that hides a forall-quantifier (for example the subset predicate in the ZF demo) we would not be able to detect it using matches.
 That is one of the reasons why the user is required to register those definitions by overriding the \texttt{custom\_fold} and \texttt{custom\_unfold} tactic.
 This way, \texttt{fintro} can unfold if it gets stuck and check if there are hidden quantifiers.
 This trick is also used by some other tactics.
@@ -413,17 +428,17 @@ Sadly there is no easy way to turn a Gallina string into an Ltac string that can
 The first solution I came up with was to split up the introduction of variables and hypotheses into two different tactics  so that one can take Coq identifiers as an argument and the other strings.
 The main problem is that this does not work, if the variable name occurs inside the pattern, as is the case with the destruction of an existential.
 Also we want a \texttt{fintros} tactic that can intro multiple things at once.
-This would need be implemented using tactic notations that figure out which version of \texttt{fintro} to call depending on the argument, leading an exponential number of tactic notations that would be required.
+This would need be implemented using tactic notations that figure out which version of \texttt{fintro} to call depending on the argument, leading to an exponential number of tactic notations that would be required.
 
 Later I found a solution by Tej Chajed developed for the Iris proof mode that translates strings into Coq identifiers\footnote{The code can be found here \url{https://gitlab.mpi-sws.org/iris/string-ident}}.
 This uses Ltac2 and converts between the different string representations, but seems a bit hacky and might break down in future versions of Coq\footnote{For more detailed discussion see here \url{https://github.com/coq/coq/issues/7922}}.
 
-Right now this solves all of the problems but the other solution is also supported, so can intro either with strings or identifiers.
+Right now this solves all of the problems but the other solution is also supported, so you can intro either with strings or identifiers.
 
 \medskip\noindent
 The \texttt{fintro} tactic is also the main driver of intro patterns.
 Every other tactic that supports intro patterns internally calls \texttt{fintro}.
-For example if your goal is \texttt{C $\vdash$ psi} and you want to call \texttt{fdestruct} on a context formula \coq{"H" : psi}, the formula will be moved to the goal and \texttt{fintro} will be called on \texttt{C $\vdash$ phi $\to$ psi} using the user given intro pattern.
+For example if your goal is \texttt{C $\vdash$ psi} and you want to call \texttt{fdestruct} on a context formula \coq{"H" : phi}, the formula will be moved to the goal and \texttt{fintro} will be called on \texttt{C $\vdash$ phi $\to$ psi} using the user given intro pattern.
 
 The implementation of the intro patterns is straightforward.
 They get parsed into the inductive type \texttt{intro\_pattern} and then recursively processed.
@@ -455,9 +470,10 @@ This obviously fails in cases, were the goal already contained evars before the 
 The \texttt{frewrite} tactic is maybe the most complicated one.
 It supports rewriting under equality with the Leibniz rule and rewriting with equivalences (but currently not under quantifiers).
 The equality predicate and proof of the Leibniz rule are given by the user through the type class \texttt{Leibniz}.
-While the rewriting with equivalences is performed through repeated application of lemmas for each operator, I tries a different syntactic approach for the equality rewriting.
+While the rewriting with equivalences is performed through repeated application of lemmas for each operator, I tried a different syntactic approach for the equality rewriting.
 The general idea can be illustrated with the following example in PA where \texttt{x} should be replaced with \texttt{y}:
 
+\medskip
 \makebox[\textwidth][c]{
 \begin{tikzpicture}\footnotesize
 \node (A) at (0,0) {\texttt{C $\vdash$ $\sigma$ x == z $\lor$ phi}};
@@ -502,7 +518,7 @@ Note that in the case of no quantifiers, we only use \texttt{up\_n 0 s} which is
 \begin{itemize}
 	\item Support rewriting in hypotheses
 	\item Support equivalence rewriting under quantifiers
-	\item Support \texttt{frewrite ... at 2}
+	\item Support \texttt{frewrite ... at n}
 	\item If you want to rewrite under quantifiers, the term needs to be already shifted (in the example above it needs to be \texttt{x`[$\uparrow$]} under the all quantifier). In some cases this is irrelevant because the term is substitution invariant (for example \texttt{num} in PA). Provide a way for the user to register such invariance lemmas and apply them accordingly.
 	\item The evar trick from \texttt{fapply} does not work here because I use syntactic matching to find occurrences of the rewrite variable. Thus the user always needs to give the instantiation for variables. But improving this might be tricky...
 \end{itemize}}
