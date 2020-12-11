@@ -110,15 +110,6 @@ Abort.
 
 
 
-(* Variable names instead of de Bruijn: *)
-
-Goal FA ⊢ ∀ ∀ $1 == $0 --> σ $1 == zero ⊕ σ $0.
-Proof.
-  fstart. fintros "x" "y" "H". frewrite "H". frewrite (ax_add_zero (σ y)).
-  fapply ax_refl.
-Qed.
-
-
 
 
 (** Classical logic *)
@@ -170,7 +161,7 @@ Qed.
 
 
 
-(* XM for closed, quantor free formulas: *)
+(** XM for closed, quantor free formulas: *)
 
 Lemma eq_num t :
   bound_term 0 t = true -> exists n, FA ⊢ (t == num n).
@@ -283,21 +274,106 @@ Admitted.
 
 (** Division Theorem with Hoas *)
 
+Ltac custom_fold ::= fold zero in *; fold PA_induction in *.
+Ltac custom_unfold ::= unfold zero in *; unfold PA_induction in *.
+
 Require Import Hoas.
 
-Lemma division_theorem x y :
-  FA ⊢ << (∃ q r, (∃ k, r ⊕ k == σ bEmbedT (num y)) ∧ bEmbedT (num x) == r ⊕ q ⊗ σ bEmbedT (num y))%hoas.
+Notation "'σ' x" := (@bFunc PA_funcs_signature Succ (Vector.cons bterm x 0 (Vector.nil bterm))) (at level 37) : hoas_scope.
+Notation "x '⊕' y" := (@bFunc PA_funcs_signature Plus (Vector.cons bterm x 1 (Vector.cons bterm y 0 (Vector.nil bterm))) ) (at level 39) : hoas_scope.
+Notation "x '⊗' y" := (@bFunc PA_funcs_signature Mult (Vector.cons x (Vector.cons y (Vector.nil bterm))) ) (at level 38) : hoas_scope. 
+Notation "x '==' y" := (@bAtom PA_funcs_signature PA_preds_signature _ Eq (Vector.cons bterm x 1 (Vector.cons bterm y 0 (Vector.nil bterm))) ) (at level 40) : hoas_scope.
+
+
+(* FA enriched with the neccessary induction rules to prove the division theorem *)
+Definition FAI := 
+  PA_induction (∀ (∃ (∃ $3 == $0 ⊕ $1 ⊗ σ $2 ∧ (∃ $1 ⊕ $0 == $3)))) :: 
+  PA_induction (∀ $1 == $0 ∨ ($1 == $0 --> ⊥)) :: 
+  PA_induction (zero == $0 ∨ (zero == $0 --> ⊥)) ::
+  ∀ PA_induction (σ $1 == $0 ∨ (σ $1 == $0 --> ⊥)) ::
+  PA_induction (∀ (∃ (∃ $3 == $0 ⊕ $1 ⊗ σ $2 ∧ (∃ $1 ⊕ $0 == $3)))) ::
+  PA_induction (∀ (∀ ($1 == $0 --> ⊥) --> $1 ⊕ $2 == $0 --> (∃ σ $2 ⊕ $0 == $1))) ::
+  PA_induction (∀ $1 ⊕ σ $0 == σ ($1 ⊕ $0)) ::
+  PA_induction (∀ $1 ⊕ $0 == $0 ⊕ $1) ::
+  PA_induction ($0 ⊕ zero == $0) ::
+  ax_zero_succ ::
+  ax_succ_inj ::
+  FA.
+
+
+Definition leq a b := (∃' k, a ⊕ k == b)%hoas.
+Infix "≤" := leq (at level 45).
+
+
+Lemma add_zero_r :
+  FAI ⊢ <<(∀' x, x ⊕ zero == x)%hoas.
 Proof.
-  induction x; cbn; fstart.
-  - fexists zero. fexists zero. fsplit.
-    + fexists (σ num y). fapply ax_add_zero.
-    + frewrite (ax_mult_zero (σ num y)). frewrite (ax_add_zero zero).
-      fapply ax_refl.
-  - fdestruct IHx as "[q [r [[k H1] H2]]]".
-    fexists q. fexists (σ r). fsplit.
-    + admit.
-    + frewrite (ax_add_rec (q ⊗ σ num y) r). fapply ax_eq_succ. fapply "H2".
-Abort.
+  fstart. fapply ((PA_induction ($0 ⊕ zero == $0))).
+  - frewrite (ax_add_zero zero). fapply ax_refl.
+  - fintros "x" "IH". frewrite (ax_add_rec zero x). frewrite "IH". fapply ax_refl.
+Qed. 
+
+Lemma add_succ_r :
+  FAI ⊢ <<(∀' x y, x ⊕ σ y == σ (x ⊕ y))%hoas.
+Proof.
+  fstart. fapply ((PA_induction (∀ $1 ⊕ σ $0 == σ ($1 ⊕ $0)))).
+  - fintros "y". frewrite (ax_add_zero (σ y)). frewrite (ax_add_zero y). fapply ax_refl.
+  - fintros "x" "IH" "y". frewrite (ax_add_rec (σ y) x). frewrite ("IH" y). 
+    frewrite (ax_add_rec y x). fapply ax_refl.
+Qed.
+
+Lemma add_comm :
+  FAI ⊢ <<(∀' x y, x ⊕ y == y ⊕ x)%hoas.
+Proof.
+  fstart. fapply ((PA_induction (∀ $1 ⊕ $0 == $0 ⊕ $1))).
+  - fintros. frewrite (ax_add_zero x). frewrite (add_zero_r x). fapply ax_refl.
+  - fintros "x" "IH" "y". frewrite (add_succ_r y x). frewrite <- ("IH" y).
+    frewrite (ax_add_rec y x). fapply ax_refl.
+Qed.
+
+Lemma term_eq_dec :
+  FAI ⊢ <<(∀' x y, (x == y) ∨ (x == y --> ⊥))%hoas.
+Proof.
+  fstart. fapply ((PA_induction (∀ $1 == $0 ∨ ($1 == $0 --> ⊥)))).
+  - fapply ((PA_induction (zero == $0 ∨ (zero == $0 --> ⊥)))).
+    + fleft. fapply ax_refl.
+    + fintros "x" "IH". fright. fapply ax_zero_succ. 
+  - fintros "x" "IH". fapply ((∀ PA_induction (σ $1 == $0 ∨ (σ $1 == $0 --> ⊥)))).
+    + fright. fintros "H". feapply ax_zero_succ. feapply ax_sym. fapply "H".
+    + fintros "y" "IHy". fspecialize ("IH" y). fdestruct "IH" as "[IH|IH]".
+      * fleft. frewrite "IH". fapply ax_refl.
+      * fright. fintros "H". fapply "IH". fapply ax_succ_inj. fapply "H".
+Qed.
+
+Lemma neq_le :
+  FAI ⊢ <<(∀' k r y, (r == y --> ⊥) --> (r ⊕ k == y) --> ∃' k', σ r ⊕ k' == y)%hoas.
+Proof.
+  fstart. fapply ((PA_induction (∀ (∀ ($1 == $0 --> ⊥) --> $1 ⊕ $2 == $0 --> (∃ σ $2 ⊕ $0 == $1))))).
+  - fintros "r" "y" "H1" "H2". fexfalso. fapply "H1". frewrite <- (ax_add_zero r).
+    frewrite (add_comm zero r). ctx.
+  - fintros "k" "IH" "r" "y". fintros "H1" "H2". fexists k.
+    frewrite <- "H2". frewrite (ax_add_rec k r). frewrite (add_comm r (σ k)).
+    frewrite (ax_add_rec r k). frewrite (add_comm k r). fapply ax_refl.
+Qed.
+
+Lemma division_theorem :
+  FAI ⊢ <<(∀' x y, ∃' q r, (x == r ⊕ q ⊗ σ y) ∧ (r ≤ y))%hoas.
+Proof.
+  fstart. fapply ((PA_induction (∀ (∃ (∃ $3 == $0 ⊕ $1 ⊗ σ $2 ∧ (∃ $1 ⊕ $0 == $3)))))).
+  - fintros "y". fexists zero. fexists zero. fsplit.
+    + frewrite (ax_mult_zero (σ y)). frewrite (ax_add_zero zero). fapply ax_refl.
+    + fexists y. fapply ax_add_zero.
+  - fintros "x" "IH" "y". fspecialize ("IH" y). fdestruct "IH" as "[q [r [IH1 [k IH2]]]]".
+    fassert (r == y ∨ (r == y --> ⊥)) as "[H|H]" by fapply term_eq_dec.
+    + fexists (σ q). fexists zero. fsplit.
+      * frewrite (ax_add_zero (σ q ⊗ σ y)). frewrite (ax_mult_rec q (σ y)).
+        frewrite (ax_add_rec (q ⊗ σ y) y). fapply ax_eq_succ.
+        frewrite "IH1". frewrite "H". fapply ax_refl.
+      * fexists y. fapply ax_add_zero.
+    + fexists q. fexists (σ r). fsplit.
+      * frewrite (ax_add_rec (q ⊗ σ y) r). fapply ax_eq_succ. ctx.
+      * fapply (neq_le k r y). ctx. ctx.
+Qed.
 
 
 

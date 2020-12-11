@@ -691,6 +691,12 @@ Section Fintro.
     intros. symmetry. apply subst_id. intros [|]; cbn. now rewrite H. reflexivity.
   Qed.
 
+  Lemma subst_zero_term t x :
+    $0 = x -> t`[fun n => match n with 0 => x | S n => $(S n) end] = t.
+  Proof.
+    intros. apply subst_term_id. intros [|]; cbn. now rewrite H. reflexivity.
+  Qed.
+
 End Fintro.
 
 
@@ -743,16 +749,20 @@ Ltac fintro_ident x :=
     let E := fresh "E" in
     apply AllI;
     assert (exists x, $0 = x) as [x E] by (now exists ($0));
-    rewrite (subst_zero t x E); clear E;
+    rewrite (subst_zero t x E);
     simpl_context_mapT;
-    simpl_subst
+    simpl_subst;
+    repeat (try rewrite subst_zero_term; [| apply E]);
+    clear E
   | [ |- @tpm _ _ ?p ?C (named_quant All _ ?t) ] =>
     let E := fresh "E" in
     apply AllI;
     assert (exists x, $0 = x) as [x E] by (now exists ($0));
-    rewrite (subst_zero t x E); clear E;
+    rewrite (subst_zero t x E);
     simpl_context_mapT;
     simpl_subst;
+    repeat (try rewrite subst_zero_term; [| apply E]);
+    clear E;
     update_binder_names
   | _ =>
     (* Unfold definitions to check if there are hidden ∀ underneath. 
@@ -1115,6 +1125,14 @@ Tactic Notation "fapply" constr(T) := make_compatible ltac:(fapply' T constr:([]
 Tactic Notation "fapply" "(" constr(T) constr(x1) ")" := make_compatible ltac:(fapply' T constr:([x1])).
 Tactic Notation "fapply" "(" constr(T) constr(x1) constr(x2) ")" := make_compatible ltac:(fapply' T constr:([x1;x2])).
 Tactic Notation "fapply" "(" constr(T) constr(x1) constr(x2) constr(x3) ")" := make_compatible ltac:(fapply' T constr:([x1;x2;x3])).
+
+(* If the term to apply is the result of a function call
+ * (like `PA_induction (...)`), this needs to be differentiated
+ * from the other parenthesis notation.
+ *
+ * To make it work, you need to put double parenthesis: [fapply ((PA_induction (...)))] *)
+Tactic Notation "feapply" "(" constr(T) ")" := make_compatible ltac:(feapply' T constr:([] : list form)).
+Tactic Notation "fapply" "(" constr(T) ")" := make_compatible ltac:(fapply' T constr:([] : list form)).
 
 
 
