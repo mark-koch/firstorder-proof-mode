@@ -44,7 +44,7 @@ Next Obligation. Admitted.
 Lemma ZF_sub_pair' x y x' y' :
   ZF ⊢ (x ≡ x' --> y ≡ y'--> sub ({x; y}) ({x'; y'})).
 Proof.
-  fstart. fintros "H1" "H2" "z". fapply ax_pair. fintros "H3".
+  fstart. fintros "H1" "H2" "z". fintros "H3".
   fapply ax_pair. frewrite <- "H1". frewrite <- "H2".
   fapply ax_pair. ctx.
 Qed.

@@ -229,47 +229,6 @@ Qed.
 
 
 
-(** Attempted Leibniz proof *)
-
-Lemma leibniz_term (t t' s : term) :
-  FA ⊢ (t == t' --> s`[t..] == s`[t'..]).
-Proof.
-  fintros. induction s; cbn.
-  - destruct x; cbn. ctx. fapply ax_refl.
-  - destruct F; repeat depelim v; cbn.
-    * fapply ax_refl.
-    * fapply ax_eq_succ. apply IH. left.
-    * fapply ax_eq_add; apply IH. left. right. left.
-    * fapply ax_eq_mult; apply IH. left. right. left.
-Qed.
-
-Lemma leibniz A phi t t' :
-  FA <<= A -> A ⊢ (t == t') -> A ⊢ phi[t..] -> A ⊢ phi[t'..].
-Proof.
-  intros X. revert t t'. 
-  enough (forall t t', A ⊢ (t == t') -> A ⊢ (phi[t..] --> phi[t'..])) as H0.
-  { intros. specialize (H0 t t' H). fapply (H0 H1). }
-  induction phi; cbn; intros. 1-3: fintros.
-  - ctx.
-  - destruct P. repeat depelim v. cbn in *. feapply ax_trans.
-    + feapply ax_trans. pose (leibniz_term t' t h) as H'. 
-      fapply H'. fapply ax_sym. fapply H. ctx.
-    + pose (leibniz_term t t' h0) as H'. fapply H'. fapply H.
-  - destruct b. 1,2: specialize (IHphi1 t t' H); specialize (IHphi2 t t' H).
-    + fsplit. 
-      * fapply IHphi1. fdestruct 0. ctx. 
-      * fapply IHphi2. fdestruct 0. ctx.
-    + fdestruct 0. 
-      * fleft. fapply IHphi1. ctx.
-      * fright. fapply IHphi2. ctx.
-    + fintros. specialize (IHphi2 t t' H). fapply IHphi2. 
-      fapply 1. assert (A ⊢ (t' == t)) as H' by now fapply ax_sym.
-      specialize (IHphi1 t' t H'). fapply IHphi1. ctx.
-  - destruct q.
-    + 
-Admitted.
-
-
 
 
 (** Division Theorem with Hoas *)
