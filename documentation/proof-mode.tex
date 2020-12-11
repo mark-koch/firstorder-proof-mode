@@ -1,4 +1,5 @@
 \documentclass[12pt, a4paper]{article}
+\usepackage[LGR, T1]{fontenc}
 \usepackage[utf8x]{inputenc}
 %\usepackage[left=2.5cm, right=2.5cm, top=2.5cm, bottom=3cm]{geometry}
 
@@ -98,9 +99,11 @@
 
 The goal of this project is to develop a proof mode for first-order logic in Coq, inspired by the Iris proof mode.
 This prototype allows the user to prove statements in a first-order deduction system using many Coq-like tactics while also aiding with context management.
+It allows significantly shorter proofs (usually 2-3 times) that are also more readable.
 
-My main contributions are contained in the Coq files \texttt{ProofMode.v} and \texttt{Theories.v}. Example use cases can be found in the demo files \texttt{DemoPA.v} and \texttt{DemoZF.v} for Peano arithmetic and Zermelo–Fraenkel set theory.
+My main contributions are contained in the Coq files \texttt{ProofMode.v} and \texttt{Theories.v}. Example use cases can be found in the demo files \texttt{DemoPA.v} for Peano arithmetic and \texttt{DemoZF.v} for Zermelo–Fraenkel set theory.
 
+\medskip\noindent
 The first part of this document contains a brief users guide describing the setup and the available tactics.
 The second part is a more in depth description of how the proof mode works internally.
 
@@ -147,6 +150,9 @@ leibniz_T T phi t t' : Axioms_T ⊑ T -> T ⊩ eq t t' -> T ⊩ phi[t..] -> T �
 \end{minted}
 Note that you can already use the other proof mode tactics to prove this.
 
+\improve{This could possibly be automated. Then the user would only need to prove the auto-generated axioms.}
+
+
 \subsection{Overview}
 
 The proof mode is invoked with the tactic \texttt{fstart}. This will change the way your goal looks like:
@@ -162,6 +168,42 @@ If you want to leave the proof mode again, simply call the \texttt{fstop} tactic
 But note that your custom hypothesis names will get lost and cannot be recovered again.
 
 \remark{It is not necessary to start the proof mode if you only want to use the custom tactics described later. These work out of the box on any goal, regardless if the proof mode is started or not. For simple examples this may already be enough, but for more complex proofs, starting the proof mode is recommended.}
+
+
+\subsection{Input syntax}
+
+The proof mode supports an easier way of writing down formulas that avoids the use of de Bruijn indices.
+Instead you can simply used names as binders like you are used to from Coq.
+For a demo of this, look at the last section of the PA demo file.
+
+\medskip\noindent
+Before using the input syntax, you need define notations for your functions and predicates as \texttt{bFunc} and \texttt{bAtom}:
+
+% Support sigma unicode symbol: https://tex.stackexchange.com/questions/458627/how-do-i-display-unicode-characters-with-minted
+\renewcommand\textsigma{\ensuremath{\mathtt{\sigma}}}
+\begin{minted}[fontsize=\footnotesize]{coq}
+	Require Import Hoas.
+	
+	Notation "x '==' y" := (bAtom Eq (Vector.cons bterm x 1 
+	                                 (Vector.cons bterm y 0
+	                                 (Vector.nil bterm))))
+	                       (at level 40) : hoas_scope.
+	                       
+	Notation "'σ' x" := (bFunc Succ (Vector.cons bterm x 0
+	                               (Vector.nil bterm))) 
+	                   (at level 37) : hoas_scope.
+	...
+\end{minted}
+
+\important{Note that you are required to put the type \texttt{bform} in the \texttt{Vector.cons} and \texttt{Vector.nil} call for the coercions to work. Also the notations must be put into the scope \texttt{hoas\_scope}.}
+To use the input syntax, prefix the formula with \texttt{<}\texttt{<} and add the \texttt{hoas} scope delimiter:
+\begin{minted}[fontsize=\footnotesize]{coq}
+   Lemma division_theorem :
+      FAI ⊢ <<(∀' x y, ∃' q r, (x == r ⊕ q ⊗ σ y) ∧ r ≤ y)%hoas.
+   Proof.
+\end{minted}
+Note that the quantifiers must have a prime behind them.
+
 
 
 \subsection{Working with the context}
@@ -197,12 +239,12 @@ There are many different ways you can refer to a hypothesis in the context:
 
 \subsubsection{\ttfamily fintro}
 
-The \texttt{fintro} tactic works analogous to the Coq \texttt{intro} tactic. 
+The \texttt{fintro} tactic works analogously to the Coq \texttt{intro} tactic. 
 There is also the \texttt{fintros}-variant for introducing multiple things at once. 
 There are a few things to note:
 \begin{itemize}
 	\item 
-	If you introduce an forall-quantifier, you can give an identifier name as a string. 
+	If you introduce a forall-quantifier, you can give an identifier name as a string. 
 	If you do not give an argument or put the string \coq{"?"}, a new name is automatically generated.
 	\example{\coq{fintro "x". fintro. fintro "?".}}
 	
@@ -230,7 +272,7 @@ You can specialize but the tactic is also able to find the correct instantiation
 \example{\coq{fapply ax_sym. feapply ("H" x z). feapply ("H1" "H2").}}
 
 \medskip\noindent
-You can also apply in Hypotheses with intro pattern support. Application of equivalences is also supported.
+You can also apply in hypotheses with intro pattern support. Application of equivalences is also supported.
 \example{\coq{feapply ax_pair in "H1" as "[H1|H1]".}}
 
 \important{The \texttt{fapply} tactic may not work, if the goal already contains evars. In that case you should use \texttt{feapply} instead.}
@@ -241,10 +283,10 @@ You can also apply in Hypotheses with intro pattern support. Application of equi
 
 For rewriting to work, make sure that you followed the corresponding setup steps.
 You need an assumption of the form \texttt{C $\vdash$ x == y} and can rewrite in the goal.
-Quantified assumptions are also supported, but your need to give the arguments explicitly.
+Quantified assumptions are also supported, but you need to give the arguments explicitly.
 \example{\coq{frewrite "H". frewrite <- (ax_sym zero x).}}
 
-\remark{Rewriting under quantors is supported but you should be aware of the following fact: If you know that \coq{x == y} you actually cannot rewrite in something like \texttt{$\forall$~\coq{x == z}}. Because of the quantor you need shifted occurence of \coq{x} like \texttt{$\forall$~\coq{x`[}$\uparrow$\coq{] == z}}.}
+\remark{Rewriting under quantifiers is supported but you should be aware of the following fact: If you know that \coq{x == y} you actually cannot rewrite in something like \texttt{$\forall$~\coq{x == z}}. Because of the quantifier you need shifted occurence of \coq{x} like \texttt{$\forall$~\coq{x`[}$\uparrow$\coq{] == z}}.}
 
 
 \subsubsection{\ttfamily fdestruct}
@@ -289,9 +331,7 @@ It puts the negated original goal in the context and leaves the user to prove fa
 \subsubsection{Other tactics}
 
 There are some other tactics that behave just like their Coq counterpart:
-\begin{center}
-	\texttt{fexfalso, fsplit, fleft, fright, fexists}
-\end{center}
+\example{\coq{fexfalso. fsplit. fleft. fright. fexists x}}
 
 
 
@@ -412,7 +452,7 @@ Also it seems more natural to introduce a term \texttt{x}, instead of a variable
 Avoiding the shift is not possible when using theories as they can contain infinitely many formulas.
 There we must use the theory variant of the vanilla forall-introduction rule.
 The variable \texttt{\$0} is again replaced with a Coq variable \texttt{x} using a substitution.
-I also want to mention, that the \texttt{mapT (subst\_term $\uparrow$)} call cannot be simplified computationally because of the way \texttt{mapT} is defined.
+I also want to mention, that the \texttt{mapT (subst\_term $\uparrow$)} call cannot be simplified computationally.
 Instead, the tactic \texttt{simpl\_context\_mapT} is used to evaluate the call in a syntactic way by repeatedly applying a rewrite lemma.
 
 \medskip\noindent
@@ -427,7 +467,7 @@ Another problem that occurred when developing the \texttt{fintro} tactic was how
 Sadly there is no easy way to turn a Gallina string into an Ltac string that can be used to create a fresh name.
 The first solution I came up with was to split up the introduction of variables and hypotheses into two different tactics  so that one can take Coq identifiers as an argument and the other strings.
 The main problem is that this does not work, if the variable name occurs inside the pattern, as is the case with the destruction of an existential.
-Also we want a \texttt{fintros} tactic that can intro multiple things at once.
+Also we want an \texttt{fintros} tactic that can intro multiple things at once.
 This would need be implemented using tactic notations that figure out which version of \texttt{fintro} to call depending on the argument, leading to an exponential number of tactic notations that would be required.
 
 Later I found a solution by Tej Chajed developed for the Iris proof mode that translates strings into Coq identifiers\footnote{The code can be found here \url{https://gitlab.mpi-sws.org/iris/string-ident}}.
@@ -468,7 +508,7 @@ This obviously fails in cases, were the goal already contained evars before the 
 \subsection{Rewriting}
 
 The \texttt{frewrite} tactic is maybe the most complicated one.
-It supports rewriting under equality with the Leibniz rule and rewriting with equivalences (but currently not under quantifiers).
+It supports rewriting under equality with the Leibniz rule and rewriting with logical equivalences (but currently not under quantifiers).
 The equality predicate and proof of the Leibniz rule are given by the user through the type class \texttt{Leibniz}.
 While the rewriting with equivalences is performed through repeated application of lemmas for each operator, I tried a different syntactic approach for the equality rewriting.
 The general idea can be illustrated with the following example in PA where \texttt{x} should be replaced with \texttt{y}:
