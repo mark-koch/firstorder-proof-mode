@@ -496,7 +496,7 @@ Ltac simpl_subst_hyp H :=
   try rewrite !subst_term_shift in H;
   try rewrite !up_form in H;
   try rewrite !subst_shift in H;
-  (* Turn `(S >> var) 4` into `$5`. TODO: Find a better way to do this. *)
+  (* Turn `(S >> var) 4` into `$5` *)
   unfold ">>";
   (* Domain specific simplifications: *)
   custom_fold;
@@ -511,7 +511,7 @@ Ltac simpl_subst_goal :=
   try rewrite !subst_term_shift;
   try rewrite !up_form;
   try rewrite !subst_shift;
-  (* Turn `(S >> var) 4` into `$5`. TODO: Find a better way to do this. *)
+  (* Turn `(S >> var) 4` into `$5` *)
   unfold ">>";
   (* Domain specific simplifications: *)
   custom_fold;
@@ -1729,6 +1729,9 @@ Ltac remove_shifts G t :=
   | _ => G
   end.
 
+(* Like [do n tac] but works with Galina numbers. *)
+Ltac repeat_n n tac := match n with 0 => idtac | S ?n' => tac; repeat_n n' tac end.
+
 Ltac frewrite' T A back := fun contxt =>
   let H := fresh "H" in
   turn_into_hypothesis T H contxt;
@@ -1783,7 +1786,7 @@ Ltac frewrite' T A back := fun contxt =>
         assert (u`[up_n n ↑]`[up_n n t..] = u) as R; [
           rewrite subst_term_comp; apply subst_term_id; 
           let a := fresh in intros a;
-          (do 10 try destruct a); reflexivity |];
+          (repeat_n n ltac:(try destruct a)); reflexivity |];
         rewrite R in X
       end;
       apply X
@@ -1836,7 +1839,7 @@ Ltac frewrite' T A back := fun contxt =>
       assert (u`[up_n n ↑]`[up_n n t'..] = u) as R; [
         rewrite subst_term_comp; apply subst_term_id; 
         let a := fresh in intros a;
-        (do 10 try destruct a); reflexivity |];
+        (repeat_n n ltac:(try destruct a)); reflexivity |];
       rewrite ! R;
       clear R
     end;
@@ -1868,65 +1871,4 @@ Ltac fexists x := make_compatible ltac:(fun _ =>
   simpl_subst).
 
 
-(* Section Test.
 
-Require Import ZF.
-
-Variable p : peirce.
-
-Definition ax_refl := ∀ $0 ≡ $0.
-Definition ax_sym := ∀ ∀ $1 ≡ $0 --> $0 ≡ $1.
-Definition ax_trans := ∀ ∀ ∀ $2 ≡ $1 --> $1 ≡ $0 --> $2 ≡ $0.
-Definition ax_eq_elem := ∀ ∀ ∀ ∀ $3 ≡ $1 --> $2 ≡ $0 --> $3 ∈ $2 --> $1 ∈ $0.
-
-Definition ZF := ax_ext::ax_eset::ax_pair::ax_union::ax_power::ax_om1::ax_om2::ax_refl::ax_sym::ax_trans::ax_eq_elem::nil.
-
-
-Ltac custom_fold ::= fold sub in *.
-Ltac custom_unfold ::= unfold sub in *.
-
-Program Instance ZF_Leibniz : Leibniz ZF_func_sig ZF_pred_sig.
-Next Obligation. exact equal. Defined.
-Next Obligation. exact ZF. Defined.
-Next Obligation. exact (fun phi => phi el ZF). Defined.
-Next Obligation. Admitted.
-Next Obligation. Admitted.
-Next Obligation. Admitted.
-
-Lemma ZF_sub_pair' x y x' y' :
-  ZF ⊢ (x ≡ x' --> y ≡ y'--> sub ({x; y}) ({x'; y'})).
-Proof.
-Admitted.
-
-Lemma ZF_eq_pair' x y x' y' :
-  ZF ⊢ (x ≡ x' --> y ≡ y'--> {x; y} ≡ {x'; y'}).
-Proof.
-  fstart. fintros "H1" "H2". fapply ax_ext. fintros z.
-  - fapply ZF_sub_pair'.
-Qed.
-
-End Test. *)
-
-
-
-
-(* Section Test.
-
-Require Import PA.
-
-Variable p : peirce.
-
-Ltac custom_fold ::= fold zero in *.
-Ltac custom_unfold ::= unfold zero in *.
-Ltac custom_simpl ::= try rewrite !numeral_subst_invariance.
-
-Program Instance PA_Leibniz : Leibniz PA_funcs_signature PA_preds_signature.
-Next Obligation. exact Eq. Defined.
-Next Obligation. exact FA. Defined.
-Next Obligation. Admitted.
-Next Obligation. Admitted.
-Next Obligation. Admitted.
-Next Obligation. Admitted.
-
-
-End Test. *)
