@@ -1,4 +1,6 @@
-# First-order logic proof mode in Coq
+# A first-order logic proof mode in Coq
+
+See the [documentation](https://raw.githubusercontent.com/mark-koch/firstorder-proof-mode/main/documentation/proof-mode.pdf) for a users guide and a description of how the proof mode works.
 
 ## Requirements
 - [Coq](https://github.com/coq/coq/) 8.12.0 (`coq.8.12.0`)
