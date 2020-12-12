@@ -86,7 +86,7 @@ Qed.
 Lemma ZF_bunion_inv' x y z :
   ZF ⊢ (z ∈ x ∪ y --> z ∈ x ∨ z ∈ y).
 Proof.
-  fstart. fintros "H". fapply ax_union in "H" as "[ [H1 H2]]". rename x0 into a.
+  fstart. fintros "H". fapply ax_union in "H" as "[a [H1 H2]]".
   feapply ax_pair in "H1" as "[H1|H1]".
   - fleft. frewrite <- "H1". ctx.
   - fright. frewrite <- "H1". ctx.
