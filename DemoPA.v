@@ -88,14 +88,14 @@ Lemma num_mult_homomorphism' x y : FA ⊢ ( num x ⊗ num y == num (x * y) ).
 Proof.
   induction x; cbn.
   - fapply ax_mult_zero.
-  - frewrite (ax_mult_rec (num x) (num y)). (* Sadly we need to give the arguments. TODO: Extend tactics to work with terms containing evars *)
+  - frewrite (ax_mult_rec (num x) (num y)). (* We need to give the instantiations for rewrite *)
     frewrite IHx. apply num_add_homomorphism'.
 Qed.
 
 
 
 
-(* Rewrite under quantors: *)
+(* Rewrite under quantifiers: *)
 
 Goal forall t t', FA ⊢ (t == t') -> FA ⊢ ∀ $0 ⊕ σ t`[↑] == t' ⊕ σ $0.
 Proof.
@@ -143,6 +143,9 @@ Qed.
 
 Definition TFA_ind : theory := fun phi => phi el FA \/ exists psi, phi = PA_induction psi.
 
+(* Context management for theories is still work in progress.
+ * Lemmas that are used need to be assert before the first fintro
+ * is done. *)
 Lemma add_zero_right :
   TFA_ind ⊩ ∀ $0 ⊕ zero == $0.
 Proof.
@@ -163,6 +166,7 @@ Qed.
 
 (** XM for closed, quantor free formulas: *)
 
+(* This lemma doesn't really use the proof mode but is required below. *)
 Lemma eq_num t :
   bound_term 0 t = true -> exists n, FA ⊢ (t == num n).
 Proof.
@@ -238,10 +242,10 @@ Ltac custom_unfold ::= unfold zero in *; unfold PA_induction in *.
 
 Require Import Hoas.
 
-Notation "'σ' x" := (@bFunc PA_funcs_signature Succ (Vector.cons bterm x 0 (Vector.nil bterm))) (at level 37) : hoas_scope.
-Notation "x '⊕' y" := (@bFunc PA_funcs_signature Plus (Vector.cons bterm x 1 (Vector.cons bterm y 0 (Vector.nil bterm))) ) (at level 39) : hoas_scope.
-Notation "x '⊗' y" := (@bFunc PA_funcs_signature Mult (Vector.cons x (Vector.cons y (Vector.nil bterm))) ) (at level 38) : hoas_scope. 
-Notation "x '==' y" := (@bAtom PA_funcs_signature PA_preds_signature _ Eq (Vector.cons bterm x 1 (Vector.cons bterm y 0 (Vector.nil bterm))) ) (at level 40) : hoas_scope.
+Notation "'σ' x" := (bFunc Succ (Vector.cons bterm x 0 (Vector.nil bterm))) (at level 37) : hoas_scope.
+Notation "x '⊕' y" := (bFunc Plus (Vector.cons bterm x 1 (Vector.cons bterm y 0 (Vector.nil bterm))) ) (at level 39) : hoas_scope.
+Notation "x '⊗' y" := (bFunc Mult (Vector.cons x (Vector.cons y (Vector.nil bterm))) ) (at level 38) : hoas_scope. 
+Notation "x '==' y" := (bAtom Eq (Vector.cons bterm x 1 (Vector.cons bterm y 0 (Vector.nil bterm))) ) (at level 40) : hoas_scope.
 
 
 (* FA enriched with the neccessary induction rules to prove the division theorem *)
@@ -264,6 +268,10 @@ Definition leq a b := (∃' k, a ⊕ k == b)%hoas.
 Infix "≤" := leq (at level 45).
 
 
+(* Rewriting in the proofs below is very slow. The reason is
+ * that [firstorder] is used to show `PAI <<= PA` for the Leibniz
+ * rule. This can be improved by writing better automation tactics
+ * (or hint databases) for list inclusion in the future. *)
 Lemma add_zero_r :
   FAI ⊢ <<(∀' x, x ⊕ zero == x)%hoas.
 Proof.
