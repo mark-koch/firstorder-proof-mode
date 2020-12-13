@@ -4,7 +4,7 @@ See the [documentation](https://raw.githubusercontent.com/mark-koch/firstorder-p
 
 ## Requirements
 - [Coq](https://github.com/coq/coq/) 8.12.0 (`coq.8.12.0`)
-- [Equantions](https://mattam82.github.io/Coq-Equations/) 1.2.3 (`coq-equations.1.2.3+8.12`)
+- [Equations](https://mattam82.github.io/Coq-Equations/) 1.2.3 (`coq-equations.1.2.3+8.12`)
 
 ## How to build
 Simply run `make`.
