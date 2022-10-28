@@ -1,5 +1,7 @@
 # A first-order logic proof mode in Coq
 
+*Update: We presented this work at the [2021 Coq Workshop](https://coq-workshop.gitlab.io/2021/). Here is the [extended abstract](https://coq-workshop.gitlab.io/2021/abstracts/Coq2021-02-01-fol-toolbox.pdf) and the [latest version](https://github.com/dominik-kirst/coq-library-undecidability/tree/fol-library/theories/FOL/Proofmode) for Coq 8.13.*
+
 See the [documentation](https://raw.githubusercontent.com/mark-koch/firstorder-proof-mode/main/documentation/proof-mode.pdf) for a users guide and a description of how the proof mode works.
 
 ## Requirements
